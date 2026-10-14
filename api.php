@@ -1385,8 +1385,8 @@ switch ($action) {
 
     // --- REALTIME POLLING / NOTIFICATIONS ---
     case 'get_notifications':
-        // Safely ensure is_dismissed column exists (runs silently if already present)
-        try { $db->exec("ALTER TABLE notifications ADD COLUMN is_dismissed TINYINT(1) DEFAULT 0"); } catch(Exception $e) {}
+        // Safely ensure is_dismissed column exists (PostgreSQL compatible)
+        try { $db->exec("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_dismissed SMALLINT DEFAULT 0"); } catch(Exception $e) {}
 
         $role = $user['role'] ?? ($_GET['role'] ?? 'customer');
         $userId = $user['id'] ?? null;
@@ -1424,7 +1424,7 @@ switch ($action) {
 
     case 'clear_notifications':
         $authUser = checkAuthUser();
-        try { $db->exec("ALTER TABLE notifications ADD COLUMN is_dismissed TINYINT(1) DEFAULT 0"); } catch(Exception $e) {}
+        try { $db->exec("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_dismissed SMALLINT DEFAULT 0"); } catch(Exception $e) {}
 
         if ($authUser['role'] === 'customer') {
             // Mark all this customer's notifications as dismissed (never deletes orders/payments)
