@@ -8,12 +8,28 @@ services:
     plan: free
     envVars:
       - key: DB_HOST
-        sync: false
+        fromDatabase:
+          name: greenharvest-db
+          property: host
       - key: DB_PORT
-        sync: false
+        fromDatabase:
+          name: greenharvest-db
+          property: port
       - key: DB_NAME
-        sync: false
+        fromDatabase:
+          name: greenharvest-db
+          property: database
       - key: DB_USER
-        sync: false
+        fromDatabase:
+          name: greenharvest-db
+          property: user
       - key: DB_PASS
-        sync: false
+        fromDatabase:
+          name: greenharvest-db
+          property: password
+
+databases:
+  - name: greenharvest-db
+    plan: free
+    databaseName: greenharvest
+    user: greenharvest

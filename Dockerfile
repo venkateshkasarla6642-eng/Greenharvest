@@ -4,8 +4,9 @@ FROM php:8.2-apache
 RUN a2dismod mpm_event mpm_worker 2>/dev/null || true \
     && a2enmod mpm_prefork
 
-# Install PDO MySQL and required PHP extensions
-RUN docker-php-ext-install pdo pdo_mysql mysqli
+# Install PostgreSQL PHP extensions
+RUN apt-get update && apt-get install -y libpq-dev \
+    && docker-php-ext-install pdo pdo_pgsql
 
 # Enable Apache mod_rewrite
 RUN a2enmod rewrite

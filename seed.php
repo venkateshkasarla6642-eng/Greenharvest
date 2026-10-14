@@ -36,7 +36,7 @@ try {
     // 2. Seed Shop Settings
     $db->exec("INSERT INTO shop_settings (id, shop_name, shop_status, shop_upi_id, min_order_amount, free_delivery_above, delivery_charge, estimated_delivery_time) 
                VALUES (1, 'GreenHarvest Veggies', 'OPEN', 'greenharvest@upi', 100.00, 300.00, 20.00, '20-30 mins')
-               ON DUPLICATE KEY UPDATE shop_name=VALUES(shop_name)");
+               ON CONFLICT (id) DO UPDATE SET shop_name=EXCLUDED.shop_name");
 
     // 3. Seed Vegetable Categories
     $categories = [
