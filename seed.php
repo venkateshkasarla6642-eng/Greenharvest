@@ -25,12 +25,45 @@ if ($isBrowser) {
 try {
     $db = getDB();
     
-    // Read schema.sql and execute
+    // Read schema.sql and execute - smart split that respects $$ dollar-quoted blocks
     $sql = file_get_contents('schema.sql');
-    $statements = array_filter(array_map('trim', explode(';', $sql)));
+    
+    // Split SQL respecting $$ dollar-quoted blocks (used in PostgreSQL triggers)
+    $statements = [];
+    $current = '';
+    $inDollarQuote = false;
+    $lines = explode("\n", $sql);
+    foreach ($lines as $line) {
+        $current .= $line . "\n";
+        // Toggle dollar-quote mode on $$
+        if (substr_count($line, '$$') % 2 !== 0) {
+            $inDollarQuote = !$inDollarQuote;
+        }
+        // Only split on semicolons outside dollar-quoted blocks
+        if (!$inDollarQuote && rtrim($line) === '$$' || 
+            (!$inDollarQuote && strpos($line, ';') !== false && !str_contains($line, '$$'))) {
+            $trimmed = trim($current);
+            if (!empty($trimmed)) {
+                $statements[] = $trimmed;
+            }
+            $current = '';
+        }
+    }
+    if (!empty(trim($current))) {
+        $statements[] = trim($current);
+    }
+
     foreach ($statements as $stmt) {
-        if (!empty($stmt)) {
-            $db->exec($stmt);
+        $trimmed = trim($stmt);
+        if (!empty($trimmed) && $trimmed !== ';') {
+            try {
+                $db->exec($trimmed);
+            } catch (PDOException $e) {
+                // Skip "already exists" type errors silently
+                if (strpos($e->getMessage(), 'already exists') === false) {
+                    echo "Schema warning: " . $e->getMessage() . "\n";
+                }
+            }
         }
     }
     
