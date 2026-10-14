@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: greenharvest
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: main
+    region: singapore
+    plan: free
+    envVars:
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
