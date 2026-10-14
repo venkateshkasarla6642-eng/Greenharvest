@@ -2,6 +2,26 @@
 // seed.php - Seed database with 100% Vegetable data, categories, users & settings
 require_once 'config.php';
 
+// -------------------------------------------------------
+// SECURITY: Require secret token to run via browser
+// Usage: https://your-app.onrender.com/seed.php?token=GREENHARVEST_SEED_2024
+// -------------------------------------------------------
+$validToken = 'GREENHARVEST_SEED_2024';
+$providedToken = $_GET['token'] ?? '';
+
+if (php_sapi_name() !== 'cli' && $providedToken !== $validToken) {
+    http_response_code(403);
+    die('<h2 style="font-family:sans-serif;color:red;">❌ Forbidden: Invalid or missing token.</h2>');
+}
+
+// Set output for browser
+$isBrowser = php_sapi_name() !== 'cli';
+if ($isBrowser) {
+    echo '<pre style="font-family:monospace;font-size:14px;padding:20px;background:#111;color:#0f0;">';
+    echo "=== GreenHarvest Database Seeder ===\n\n";
+    ob_flush(); flush();
+}
+
 try {
     $db = getDB();
     
@@ -293,7 +313,15 @@ try {
         }
     }
 
-    echo "Database successfully seeded with 100% Vegetable data!\n";
+    echo "✅ Database successfully seeded with 100% Vegetable data!\n";
+    echo "\nSeeded:\n";
+    echo "  - Tables: users, categories, products, orders, offers, shop_settings, etc.\n";
+    echo "  - Users: shopkeeper (9876543210) & customer (9123456789) — password: 123456\n";
+    echo "  - 19 Vegetable Products across 16 categories\n";
+    echo "  - 3 Discount Offers (VEG10, GREEN50, FRESH15)\n";
+    echo "\n🎉 Your GreenHarvest app is ready!\n";
+    if ($isBrowser) echo '</pre>';
 } catch (Exception $e) {
-    echo "Seed Error: " . $e->getMessage() . "\n";
+    echo "❌ Seed Error: " . $e->getMessage() . "\n";
+    if ($isBrowser) echo '</pre>';
 }
