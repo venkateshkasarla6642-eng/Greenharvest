@@ -99,6 +99,11 @@ const App = (() => {
   function cartSave() { localStorage.setItem('gh_cart', JSON.stringify(state.cart)); }
 
   function cartAdd(p, unit) {
+    if (!state.user) {
+      toast('Please sign in to add items to cart!', 'error');
+      renderAuthView('customer', 'login');
+      return;
+    }
     const unit_w = unit || state.selectedProductUnits[p.id] || (p.available_units || '1kg').split(',')[0].trim();
     const idx = state.cart.findIndex(c => c.product_id === p.id && c.unit_weight === unit_w);
     if (idx >= 0) {
@@ -3486,6 +3491,142 @@ const App = (() => {
     }
   }
 
+
+  // ─── NOTIFICATION SOUND SYSTEM ────────────────────────────────
+  const NotifSound = (() => {
+    let _audioCtx = null;
+    let _lastPlayTime = 0;
+    const MIN_GAP_MS = 2000; // prevent overlapping sounds
+
+    function _getCtx() {
+      if (!_audioCtx) {
+        try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+      }
+      return _audioCtx;
+    }
+
+    function _play(volume) {
+      const ctx = _getCtx();
+      if (!ctx) return false;
+      try {
+        const now = Date.now();
+        if (now - _lastPlayTime < MIN_GAP_MS) return true; // already playing
+        _lastPlayTime = now;
+
+        // Two-tone chime: pleasant, attention-grabbing
+        const gain = ctx.createGain();
+        gain.connect(ctx.destination);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(Math.min(1, volume), ctx.currentTime + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+
+        const osc1 = ctx.createOscillator();
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(880, ctx.currentTime);
+        osc1.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.25);
+        osc1.connect(gain);
+        osc1.start(ctx.currentTime);
+        osc1.stop(ctx.currentTime + 0.6);
+
+        const gain2 = ctx.createGain();
+        gain2.connect(ctx.destination);
+        gain2.gain.setValueAtTime(0, ctx.currentTime + 0.15);
+        gain2.gain.linearRampToValueAtTime(Math.min(1, volume) * 0.7, ctx.currentTime + 0.17);
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+
+        const osc2 = ctx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(1100, ctx.currentTime + 0.15);
+        osc2.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.4);
+        osc2.connect(gain2);
+        osc2.start(ctx.currentTime + 0.15);
+        osc2.stop(ctx.currentTime + 0.7);
+
+        return true;
+      } catch (e) { return false; }
+    }
+
+    function isEnabled() { return localStorage.getItem('gh_notif_sound') !== 'off'; }
+    function getVolume() { return parseFloat(localStorage.getItem('gh_notif_vol') || '0.8'); }
+    function setEnabled(v) { localStorage.setItem('gh_notif_sound', v ? 'on' : 'off'); }
+    function setVolume(v) { localStorage.setItem('gh_notif_vol', String(v)); }
+
+    function playNew() {
+      if (!isEnabled()) return;
+      const ok = _play(getVolume());
+      if (!ok) {
+        // AudioContext may be suspended until user interaction; resume it
+        if (_audioCtx && _audioCtx.state === 'suspended') {
+          _audioCtx.resume().then(() => _play(getVolume()));
+        }
+      }
+    }
+
+    function test() {
+      // Always attempt; may need user interaction first
+      if (_audioCtx && _audioCtx.state === 'suspended') {
+        _audioCtx.resume().then(() => _play(getVolume()));
+      } else {
+        const ok = _play(getVolume());
+        if (!ok) return false;
+      }
+      return true;
+    }
+
+    return { isEnabled, getVolume, setEnabled, setVolume, playNew, test };
+  })();
+
+  // ─── NOTIFICATION NAVIGATION ───────────────────────────────────
+  function notifNavigate(notif) {
+    const link = notif.link || '';
+    const type = notif.type || '';
+    const msg  = (notif.message || '').toLowerCase();
+    const title = (notif.title || '').toLowerCase();
+
+    // Extract order ID from link like "#order-123"
+    const orderMatch = link.match(/#order-(\d+)/);
+    const orderId = orderMatch ? parseInt(orderMatch[1]) : null;
+
+    // Close panel
+    state.notifPanelOpen = false;
+    qs('#notifPanel')?.classList.remove('open');
+
+    if (state.role === 'shopkeeper') {
+      // Shopkeeper: navigate to orders page
+      window.location.hash = 'orders';
+      navigateToShopPage('orders');
+      return;
+    }
+
+    // Customer navigation
+    if (type === 'payment' || link === '#payments' || title.includes('payment')) {
+      renderCustomerPaymentsView();
+      return;
+    }
+
+    if (orderId) {
+      // Navigate to orders and highlight the specific order
+      renderCustomerOrdersView();
+      // After rendering, try to open the specific order's details
+      setTimeout(async () => {
+        try {
+          const data = await api('get_order_details', { id: orderId });
+          if (data.order && data.order.customer_id == state.user?.id) {
+            trackOrder(orderId);
+          }
+        } catch (e) { /* order may not exist, already on orders page */ }
+      }, 400);
+      return;
+    }
+
+    if (type === 'order' || msg.includes('order')) {
+      renderCustomerOrdersView();
+      return;
+    }
+
+    // Fallback: stay on current page, panel is already closed
+  }
+
   // NOTIFICATIONS
   async function loadNotifications() {
     const data = await api('get_notifications', { role: state.role });
@@ -3493,25 +3634,132 @@ const App = (() => {
     const panel = qs('#notifPanel');
     if (!panel) return;
 
+    // Detect genuinely new notifications (IDs not seen before) for sound
+    const prevIds = state._notifKnownIds || new Set();
+    const newIds = new Set(notifs.map(n => String(n.id)));
+    const hasNew = notifs.some(n => !prevIds.has(String(n.id)) && n.is_read == 0);
+
+    // Only play sound if we already had a previous load (not first load) and there are new unread
+    if (state._notifLoaded && hasNew) {
+      NotifSound.playNew();
+    }
+    state._notifKnownIds = newIds;
+    state._notifLoaded = true;
+
     state.notifBadgeCount = notifs.filter(n => !n.is_read).length;
     const badge = qs('#notifBadge');
-    if (badge) { badge.textContent = state.notifBadgeCount; badge.style.display = state.notifBadgeCount ? 'flex' : 'none'; }
+    if (badge) {
+      badge.textContent = state.notifBadgeCount;
+      badge.style.display = state.notifBadgeCount ? 'flex' : 'none';
+    }
+
+    const soundEnabled = NotifSound.isEnabled();
+    const vol = NotifSound.getVolume();
 
     panel.innerHTML = `
-      <div class="notif-header">🔔 Notifications ${state.notifBadgeCount > 0 ? `<span style="background:var(--danger);color:white;font-size:11px;padding:2px 7px;border-radius:10px;margin-left:6px;">${state.notifBadgeCount} new</span>` : ''}</div>
-      <div class="notif-list">
+      <div class="notif-header">
+        <div class="notif-header-left">
+          <span class="notif-header-title">🔔 Notifications</span>
+          ${state.notifBadgeCount > 0 ? `<span class="notif-new-badge">${state.notifBadgeCount} new</span>` : ''}
+        </div>
+        <div class="notif-header-right">
+          <button class="notif-sound-btn" id="notifSoundToggle" title="${soundEnabled ? 'Sound ON — click to mute' : 'Sound OFF — click to enable'}" aria-label="Toggle notification sound">
+            ${soundEnabled ? '🔊' : '🔇'}
+          </button>
+          ${notifs.length > 0 ? `<button class="notif-clear-btn" id="notifClearAll" title="Clear all notifications" aria-label="Clear all notifications">Clear All</button>` : ''}
+        </div>
+      </div>
+      <div class="notif-sound-bar" id="notifSoundBar" style="display:${soundEnabled ? 'flex' : 'none'};">
+        <span class="notif-sound-label">🔊 Volume</span>
+        <input type="range" class="notif-vol-slider" id="notifVolSlider" min="0.1" max="1" step="0.1" value="${vol}" aria-label="Notification volume">
+        <button class="notif-test-btn" id="notifTestSound">Test</button>
+      </div>
+      <div class="notif-list" id="notifList">
         ${notifs.length === 0
-          ? '<div class="text-center text-muted" style="padding:20px;">No notifications</div>'
+          ? '<div class="notif-empty">🔔<br>No notifications</div>'
           : notifs.map(n => `
-            <div class="notif-item ${n.is_read==0?'unread':''}">
-              <div class="notif-title">${n.title}</div>
-              <div class="notif-msg">${n.message}</div>
-              <div class="notif-time">${timeAgo(n.created_at)}</div>
+            <div class="notif-item ${n.is_read == 0 ? 'unread' : ''}" data-notif-id="${n.id}" data-notif-link="${escapeHtml(n.link || '')}" data-notif-type="${escapeHtml(n.type || '')}" role="button" tabindex="0" aria-label="${escapeHtml(n.title)}">
+              <div class="notif-item-inner">
+                <div class="notif-title">${escapeHtml(n.title)}</div>
+                <div class="notif-msg">${escapeHtml(n.message)}</div>
+                <div class="notif-time">${timeAgo(n.created_at)}</div>
+              </div>
+              ${n.link ? '<div class="notif-arrow">›</div>' : ''}
             </div>
           `).join('')
         }
       </div>
     `;
+
+    // Wire up notification item clicks
+    panel.querySelectorAll('.notif-item').forEach(itemEl => {
+      const notifId = itemEl.dataset.notifId;
+      const notifLink = itemEl.dataset.notifLink;
+      const notifType = itemEl.dataset.notifType;
+      const handler = () => {
+        // Mark as read
+        if (itemEl.classList.contains('unread')) {
+          itemEl.classList.remove('unread');
+          api('mark_notification_read', { id: notifId }, 'POST');
+          state.notifBadgeCount = Math.max(0, state.notifBadgeCount - 1);
+          const badge2 = qs('#notifBadge');
+          if (badge2) { badge2.textContent = state.notifBadgeCount; badge2.style.display = state.notifBadgeCount ? 'flex' : 'none'; }
+        }
+        // Navigate if there's a link
+        if (notifLink || notifType) {
+          notifNavigate({ link: notifLink, type: notifType, message: itemEl.querySelector('.notif-msg')?.textContent || '', title: itemEl.querySelector('.notif-title')?.textContent || '' });
+        }
+      };
+      itemEl.addEventListener('click', handler);
+      itemEl.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handler(); } });
+    });
+
+    // Clear All button
+    qs('#notifClearAll')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const confirmed = confirm('Are you sure you want to clear all notifications?\nThis action cannot be undone.\n\nNote: Your orders, payments, and other data are not affected.');
+      if (!confirmed) return;
+      qs('#notifClearAll').disabled = true;
+      api('clear_notifications', {}, 'POST').then(res => {
+        if (res.success) {
+          state.notifBadgeCount = 0;
+          state._notifKnownIds = new Set();
+          loadNotifications();
+          toast('✅ All notifications cleared.');
+        } else {
+          toast('Failed to clear notifications. Please try again.', 'error');
+          if (qs('#notifClearAll')) qs('#notifClearAll').disabled = false;
+        }
+      }).catch(() => {
+        toast('Network error. Please try again.', 'error');
+        if (qs('#notifClearAll')) qs('#notifClearAll').disabled = false;
+      });
+    });
+
+    // Sound toggle
+    qs('#notifSoundToggle')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const newState = !NotifSound.isEnabled();
+      NotifSound.setEnabled(newState);
+      const btn = qs('#notifSoundToggle');
+      const bar = qs('#notifSoundBar');
+      if (btn) { btn.textContent = newState ? '🔊' : '🔇'; btn.title = newState ? 'Sound ON — click to mute' : 'Sound OFF — click to enable'; }
+      if (bar) bar.style.display = newState ? 'flex' : 'none';
+      if (newState) NotifSound.test();
+    });
+
+    // Volume slider
+    qs('#notifVolSlider')?.addEventListener('input', e => {
+      e.stopPropagation();
+      NotifSound.setVolume(parseFloat(e.target.value));
+    });
+
+    // Test sound
+    qs('#notifTestSound')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const ok = NotifSound.test();
+      if (!ok) toast('⚠️ Browser blocked audio. Interact with the page first, then try again.', 'error');
+    });
   }
 
   function toggleNotifPanel() {
@@ -4144,16 +4392,26 @@ const App = (() => {
     });
   }
 
-  // NOTIF TOGGLE
+
+  // NOTIF TOGGLE — only registers listeners once even if called multiple times
   function initNotifBtn() {
-    qs('#notifBtn')?.addEventListener('click', (e) => {
+    const btn = qs('#notifBtn');
+    if (!btn || btn._notifInited) return;
+    btn._notifInited = true;
+
+    btn.addEventListener('click', (e) => {
       e.stopPropagation();
       toggleNotifPanel();
     });
-    document.addEventListener('click', () => {
-      if (state.notifPanelOpen) {
+
+    // Close panel when clicking outside (works for both dropdown and bottom sheet)
+    document.addEventListener('click', (e) => {
+      if (!state.notifPanelOpen) return;
+      const panel = qs('#notifPanel');
+      const wrapper = qs('#notifWrapper');
+      if (panel && !panel.contains(e.target) && !wrapper?.contains(e.target)) {
         state.notifPanelOpen = false;
-        qs('#notifPanel')?.classList.remove('open');
+        panel.classList.remove('open');
       }
     });
   }
@@ -4174,7 +4432,10 @@ const App = (() => {
     if (!userData.user) {
       state.user = null;
       state.role = null;
-      renderAuthView();
+      updateHeaderAuth();
+      initSearch();
+      renderSideMenu();
+      renderCustomerView();
       return;
     }
 

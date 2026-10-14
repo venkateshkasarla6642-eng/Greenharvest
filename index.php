@@ -28,7 +28,7 @@ require_once 'config.php';
     </button>
 
     <!-- Brand Logo -->
-    <a href="#" class="brand-logo" onclick="location.reload(); return false;">
+    <a href="#" class="brand-logo" onclick="(function(){ var s=App.getState?App.getState():{}; if(s.role==='shopkeeper'){window.location.hash='dashboard';App.navigateToShopPage('dashboard');}else if(s.role==='customer'){window.location.hash='';App.renderCustomerView();}else{location.reload();} App.closeSideMenu&&App.closeSideMenu(); })(); return false;">
       <div class="brand-icon">🥬</div>
       <div>
         <div class="brand-name">GreenHarvest</div>

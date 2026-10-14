@@ -927,8 +927,8 @@ switch ($action) {
         ];
 
         if (isset($statusTitles[$newStatus])) {
-            $stmtNotif = $db->prepare("INSERT INTO notifications (user_id, for_role, title, message, type) VALUES (?, 'customer', ?, ?, 'order')");
-            $stmtNotif->execute([$ord['customer_id'], $statusTitles[$newStatus], $statusMsgs[$newStatus]]);
+            $stmtNotif = $db->prepare("INSERT INTO notifications (user_id, for_role, title, message, type, link) VALUES (?, 'customer', ?, ?, 'order', ?)");
+            $stmtNotif->execute([$ord['customer_id'], $statusTitles[$newStatus], $statusMsgs[$newStatus], "#order-{$orderId}"]);
         }
 
         jsonResponse(['success' => true]);
@@ -1385,19 +1385,57 @@ switch ($action) {
 
     // --- REALTIME POLLING / NOTIFICATIONS ---
     case 'get_notifications':
+        // Safely ensure is_dismissed column exists (runs silently if already present)
+        try { $db->exec("ALTER TABLE notifications ADD COLUMN is_dismissed TINYINT(1) DEFAULT 0"); } catch(Exception $e) {}
+
         $role = $user['role'] ?? ($_GET['role'] ?? 'customer');
         $userId = $user['id'] ?? null;
 
-        $sql = "SELECT * FROM notifications WHERE (for_role = 'all' OR for_role = ?)";
+        $sql = "SELECT * FROM notifications WHERE (for_role = 'all' OR for_role = ?) AND (is_dismissed = 0 OR is_dismissed IS NULL)";
         $params = [$role];
         if ($role === 'customer' && $userId) {
             $sql .= " AND (user_id = ? OR user_id IS NULL)";
             $params[] = $userId;
+        } elseif ($role === 'shopkeeper') {
+            $sql .= " AND (user_id IS NULL)";
         }
-        $sql .= " ORDER BY id DESC LIMIT 15";
+        $sql .= " ORDER BY id DESC LIMIT 30";
         $stmt = $db->prepare($sql);
         $stmt->execute($params);
         jsonResponse(['notifications' => $stmt->fetchAll()]);
+        break;
+
+    case 'mark_notification_read':
+        $authUser = checkAuthUser();
+        $notifId = intval($_POST['id'] ?? 0);
+        if ($notifId <= 0) { jsonResponse(['error' => 'Invalid notification ID'], 400); }
+        // Only mark if this notification belongs to this user or is a role-wide one the user can see
+        $stmt = $db->prepare("SELECT * FROM notifications WHERE id = ?");
+        $stmt->execute([$notifId]);
+        $n = $stmt->fetch();
+        if (!$n) { jsonResponse(['error' => 'Notification not found'], 404); }
+        // Security: customer can only mark their own or NULL user_id notifications
+        if ($authUser['role'] === 'customer' && $n['user_id'] && $n['user_id'] != $authUser['id']) {
+            jsonResponse(['error' => 'Unauthorized'], 403);
+        }
+        $db->prepare("UPDATE notifications SET is_read = 1 WHERE id = ?")->execute([$notifId]);
+        jsonResponse(['success' => true]);
+        break;
+
+    case 'clear_notifications':
+        $authUser = checkAuthUser();
+        try { $db->exec("ALTER TABLE notifications ADD COLUMN is_dismissed TINYINT(1) DEFAULT 0"); } catch(Exception $e) {}
+
+        if ($authUser['role'] === 'customer') {
+            // Mark all this customer's notifications as dismissed (never deletes orders/payments)
+            $db->prepare("UPDATE notifications SET is_dismissed = 1, is_read = 1 WHERE (user_id = ? OR (user_id IS NULL AND for_role = 'customer')) AND (is_dismissed = 0 OR is_dismissed IS NULL)")
+               ->execute([$authUser['id']]);
+        } elseif ($authUser['role'] === 'shopkeeper') {
+            // Shopkeeper sees role-wide notifications (user_id IS NULL, for_role = shopkeeper)
+            $db->prepare("UPDATE notifications SET is_dismissed = 1, is_read = 1 WHERE for_role = 'shopkeeper' AND user_id IS NULL AND (is_dismissed = 0 OR is_dismissed IS NULL)")
+               ->execute([]);
+        }
+        jsonResponse(['success' => true]);
         break;
 
     case 'stream_updates':
