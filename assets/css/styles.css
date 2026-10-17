@@ -530,7 +530,60 @@ img { display: block; max-width: 100%; height: auto; }
   box-shadow: 0 2px 6px rgba(22, 163, 74, 0.35);
 }
 
+/* ─── PWA INSTALL BUTTON ─────────────────────── */
+.btn-pwa-install {
+  display: none; /* shown only when installable */
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 22px;
+  border: 1.5px solid #16a34a;
+  background: linear-gradient(135deg, #16a34a, #15803d);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all .2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  box-shadow: 0 3px 12px rgba(22,163,74,0.30);
+  flex-shrink: 0;
+  animation: pwa-pulse 2.5s ease-in-out infinite;
+}
+
+.btn-pwa-install:hover {
+  background: linear-gradient(135deg, #15803d, #166534);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(22,163,74,0.40);
+  animation: none;
+}
+
+.btn-pwa-install:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(22,163,74,0.20);
+}
+
+.pwa-install-icon { font-size: 16px; line-height: 1; }
+.pwa-install-label { font-size: 12.5px; letter-spacing: 0.2px; }
+
+@keyframes pwa-pulse {
+  0%, 100% { box-shadow: 0 3px 12px rgba(22,163,74,0.30); }
+  50% { box-shadow: 0 4px 20px rgba(22,163,74,0.50); }
+}
+
+/* Hide label on very small screens — show icon only */
+@media (max-width: 380px) {
+  .pwa-install-label { display: none; }
+  .btn-pwa-install { padding: 8px 10px; }
+}
+
+/* PWA standalone mode: add bottom padding for nav */
+@media (display-mode: standalone) {
+  body { padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+
 /* ─── SHOP CLOSED BANNER ─────────────────────── */
+
 .shop-closed-banner {
   background: linear-gradient(135deg, #dc2626, #b91c1c);
   color: white; padding: 12px 24px;
