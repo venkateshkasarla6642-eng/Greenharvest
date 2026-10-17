@@ -4471,6 +4471,84 @@ const App = (() => {
     startPolling();
   }
 
+  // ─── SIDE MENU (MOBILE DRAWER) ──────────────────
+  function toggleSideMenu() {
+    const drawer = document.getElementById('sideMenuDrawer');
+    const overlay = document.getElementById('sideMenuOverlay');
+    const btn = document.getElementById('mobileMenuBtn');
+    if (!drawer) return;
+    const isOpen = drawer.classList.contains('open');
+    if (isOpen) {
+      closeSideMenu();
+    } else {
+      drawer.style.display = 'flex';
+      requestAnimationFrame(() => {
+        drawer.classList.add('open');
+        if (overlay) { overlay.style.display = 'block'; overlay.classList.add('open'); }
+        if (btn) btn.classList.add('open');
+        document.body.style.overflow = 'hidden';
+      });
+      // Populate side menu content
+      _populateSideMenu();
+    }
+  }
+
+  function closeSideMenu() {
+    const drawer = document.getElementById('sideMenuDrawer');
+    const overlay = document.getElementById('sideMenuOverlay');
+    const btn = document.getElementById('mobileMenuBtn');
+    if (!drawer) return;
+    drawer.classList.remove('open');
+    if (overlay) { overlay.classList.remove('open'); setTimeout(() => { overlay.style.display = 'none'; }, 280); }
+    if (btn) btn.classList.remove('open');
+    document.body.style.overflow = '';
+    setTimeout(() => { if (!drawer.classList.contains('open')) drawer.style.display = 'none'; }, 300);
+  }
+
+  function _populateSideMenu() {
+    const content = document.getElementById('sideMenuContent');
+    if (!content) return;
+    if (!state.user) {
+      content.innerHTML = `
+        <div style="padding:12px 4px 8px; border-bottom:1px solid #f1f5f9; margin-bottom:8px;">
+          <p style="font-size:12.5px;color:#64748b;font-weight:600;margin-bottom:10px;">Welcome to GreenHarvest</p>
+          <button class="btn-guest-login" style="width:100%;margin-bottom:8px;border-radius:12px;justify-content:center;display:flex;" onclick="App.renderAuthView('customer','login');App.closeSideMenu();">Sign In</button>
+          <button class="btn-guest-register" style="width:100%;border-radius:12px;justify-content:center;display:flex;" onclick="App.renderAuthView('customer','register');App.closeSideMenu();">Register</button>
+        </div>
+        <button class="side-nav-item" onclick="App.closeSideMenu();"><span class="nav-icon">🥬</span> Browse Vegetables</button>
+      `;
+    } else if (state.role === 'customer') {
+      content.innerHTML = `
+        <div style="padding:4px 4px 12px; border-bottom:1px solid #f1f5f9; margin-bottom:8px;">
+          <div style="font-weight:800;font-size:15px;color:#0f172a;">${state.user.name || state.user.email}</div>
+          <div style="font-size:12px;color:#16a34a;font-weight:600;margin-top:2px;">Customer Account</div>
+        </div>
+        <button class="side-nav-item" onclick="window.location.hash='';App.renderCustomerView();App.closeSideMenu();"><span class="nav-icon">🥬</span> Shop</button>
+        <button class="side-nav-item" onclick="window.location.hash='orders';App.renderCustomerOrdersView();App.closeSideMenu();"><span class="nav-icon">📦</span> My Orders</button>
+        <button class="side-nav-item" onclick="window.location.hash='payments';App.renderCustomerPaymentsView();App.closeSideMenu();"><span class="nav-icon">💳</span> Payments</button>
+        <button class="side-nav-item" onclick="window.location.hash='profile';App.renderCustomerProfileView();App.closeSideMenu();"><span class="nav-icon">👤</span> Profile</button>
+        <div style="margin-top:auto;padding-top:16px;border-top:1px solid #f1f5f9;">
+          <button class="side-nav-item" style="color:#ef4444;" onclick="App.logout();App.closeSideMenu();"><span class="nav-icon">🚪</span> Sign Out</button>
+        </div>
+      `;
+    } else {
+      content.innerHTML = `
+        <div style="padding:4px 4px 12px; border-bottom:1px solid #f1f5f9; margin-bottom:8px;">
+          <div style="font-weight:800;font-size:15px;color:#0f172a;">${state.user.name || state.user.email}</div>
+          <div style="font-size:12px;color:#16a34a;font-weight:600;margin-top:2px;">Shopkeeper</div>
+        </div>
+        <button class="side-nav-item" onclick="App.navigateToShopPage('dashboard');App.closeSideMenu();"><span class="nav-icon">📊</span> Dashboard</button>
+        <button class="side-nav-item" onclick="App.navigateToShopPage('orders');App.closeSideMenu();"><span class="nav-icon">📦</span> Orders</button>
+        <button class="side-nav-item" onclick="App.navigateToShopPage('vegetables');App.closeSideMenu();"><span class="nav-icon">🥬</span> Vegetables</button>
+        <button class="side-nav-item" onclick="App.navigateToShopPage('inventory');App.closeSideMenu();"><span class="nav-icon">📋</span> Inventory</button>
+        <button class="side-nav-item" onclick="App.navigateToShopPage('payments');App.closeSideMenu();"><span class="nav-icon">💰</span> Payments</button>
+        <div style="margin-top:auto;padding-top:16px;border-top:1px solid #f1f5f9;">
+          <button class="side-nav-item" style="color:#ef4444;" onclick="App.logout();App.closeSideMenu();"><span class="nav-icon">🚪</span> Sign Out</button>
+        </div>
+      `;
+    }
+  }
+
   return {
     ...Public,
     init,
@@ -4503,7 +4581,9 @@ const App = (() => {
     setOrderStatus,
     verifyPay,
     openShopOrderDetailsModal,
-    getState: () => state
+    getState: () => state,
+    toggleSideMenu,
+    closeSideMenu
   };
 })();
 
