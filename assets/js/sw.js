@@ -1,7 +1,8 @@
-// assets/js/sw.js — GreenHarvest PWA Service Worker
+// assets/js/sw.js — GreenHarvest PWA Service Worker v2
 // Caches static assets for offline shell; never caches auth/API/private data.
+// Updated: icons now correctly sized (192, 512) — cache version bumped.
 
-const CACHE_NAME = 'gh-shell-v1';
+const CACHE_NAME = 'gh-shell-v2';
 
 // Static assets to pre-cache (app shell)
 const SHELL_ASSETS = [
@@ -10,6 +11,10 @@ const SHELL_ASSETS = [
   '/assets/js/app.js',
   '/assets/icons/icon-192.png',
   '/assets/icons/icon-512.png',
+  '/assets/icons/icon-maskable-192.png',
+  '/assets/icons/icon-maskable-512.png',
+  '/assets/icons/apple-touch-icon.png',
+  '/assets/icons/favicon.png',
   '/manifest.webmanifest'
 ];
 

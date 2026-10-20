@@ -3894,9 +3894,33 @@ const App = (() => {
     }
   }
 
+  function _pwaInstallSideBtn() {
+    // Returns HTML + binds click for the side-menu PWA install button.
+    // Only shown when not already installed (standalone) and install is possible.
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    const hasPrompt = window.GH_PWA && window.GH_PWA._deferredPrompt;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isStandalone) return { html: '', bind: () => {} };
+    const html = `
+      <div style="margin-top:12px; padding-top:12px; border-top:1px solid #f0fdf4;">
+        <button class="side-menu-nav-item" id="smPwaInstall" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:rgba(22,163,74,0.25);color:#15803d;">
+          <span class="icon">📲</span> Install GreenHarvest App
+        </button>
+      </div>`;
+    const bind = () => {
+      qs('#smPwaInstall')?.addEventListener('click', () => {
+        closeSideMenu();
+        if (window.GH_PWA) window.GH_PWA.promptInstall();
+      });
+    };
+    return { html, bind };
+  }
+
   function renderSideMenu() {
     const container = qs('#sideMenuContent');
     if (!container) return;
+
+    const pwaBtn = _pwaInstallSideBtn();
 
     if (!state.user) {
       container.innerHTML = `
@@ -3915,10 +3939,12 @@ const App = (() => {
             <span class="icon">🏪</span> Shopkeeper Login
           </button>
         </div>
+        ${pwaBtn.html}
       `;
       qs('#smGuestLogin')?.addEventListener('click', () => { closeSideMenu(); renderAuthView('customer', 'login'); });
       qs('#smGuestRegister')?.addEventListener('click', () => { closeSideMenu(); renderAuthView('customer', 'register'); });
       qs('#smShopLogin')?.addEventListener('click', () => { closeSideMenu(); renderAuthView('shopkeeper', 'login'); });
+      pwaBtn.bind();
       return;
     }
 
@@ -3966,6 +3992,7 @@ const App = (() => {
             </button>
           </div>
         </div>
+        ${pwaBtn.html}
       `;
       qs('#smCustProfile')?.addEventListener('click', () => { closeSideMenu(); renderCustomerProfileView(); });
       qs('#smCustHome')?.addEventListener('click', () => { closeSideMenu(); renderCustomerView(); });
@@ -3985,6 +4012,7 @@ const App = (() => {
       });
       qs('#smCustSupport')?.addEventListener('click', () => { closeSideMenu(); openChat(); });
       qs('#smCustLogout')?.addEventListener('click', () => { closeSideMenu(); logout(); });
+      pwaBtn.bind();
     } else if (state.role === 'shopkeeper') {
       const curHash = window.location.hash.replace('#', '') || 'dashboard';
       container.innerHTML = `
@@ -4035,6 +4063,7 @@ const App = (() => {
             </button>
           </div>
         </div>
+        ${pwaBtn.html}
       `;
       qs('#smShopDashboard')?.addEventListener('click', () => { closeSideMenu(); navigateToShopPage('dashboard'); });
       qs('#smShopOrders')?.addEventListener('click', () => { closeSideMenu(); navigateToShopPage('orders'); });
@@ -4046,6 +4075,7 @@ const App = (() => {
       qs('#smShopSettings')?.addEventListener('click', () => { closeSideMenu(); navigateToShopPage('settings'); });
       qs('#smShopProfile')?.addEventListener('click', () => { closeSideMenu(); navigateToShopPage('profile'); });
       qs('#smShopLogout')?.addEventListener('click', () => { closeSideMenu(); logout(); });
+      pwaBtn.bind();
     }
   }
 

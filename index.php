@@ -189,6 +189,7 @@ require_once 'config.php';
               newWorker.addEventListener('statechange', function() {
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
                   console.log('[PWA] New version available — will activate on next visit.');
+                  GH_PWA._showUpdateToast();
                 }
               });
             });
@@ -216,8 +217,11 @@ require_once 'config.php';
         GH_PWA._deferredPrompt = null;
         GH_PWA._installed = true;
         GH_PWA._hideInstallBtn();
-        console.log('[PWA] GreenHarvest installed!');
+        console.log('[PWA] GreenHarvest installed successfully!');
       });
+
+      // Online / Offline network status banner
+      GH_PWA._initNetworkBanner();
     },
 
     promptInstall: function() {
@@ -249,19 +253,55 @@ require_once 'config.php';
       if (btn) btn.style.display = 'none';
     },
 
+    _showUpdateToast: function() {
+      var t = document.createElement('div');
+      t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;background:#0f172a;color:#fff;padding:10px 20px;border-radius:50px;font-size:13px;font-weight:700;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;align-items:center;gap:10px;white-space:nowrap;';
+      t.innerHTML = '<span>\uD83D\uDD04</span> <span>Update available \u2014 <a href="" style="color:#86efac;text-decoration:underline;" onclick="location.reload();return false;">Refresh</a> for latest version</span>';
+      document.body.appendChild(t);
+      setTimeout(function() {
+        t.style.opacity = '0';
+        t.style.transition = 'opacity 0.5s';
+        setTimeout(function(){ t.remove(); }, 500);
+      }, 8000);
+    },
+
+    _initNetworkBanner: function() {
+      var banner = document.createElement('div');
+      banner.id = 'pwaOfflineBanner';
+      banner.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;z-index:9998;background:#dc2626;color:white;text-align:center;padding:8px 16px;font-size:13px;font-weight:700;letter-spacing:0.2px;';
+      banner.innerHTML = '\u26A0\uFE0F You are offline \u2014 some features may be unavailable';
+      document.body.appendChild(banner);
+
+      function updateBanner() {
+        banner.style.display = navigator.onLine ? 'none' : 'block';
+      }
+      window.addEventListener('online', updateBanner);
+      window.addEventListener('offline', updateBanner);
+      updateBanner();
+    },
+
     _showIOSInstructions: function() {
       var html = [
         '<div style="text-align:center;padding:8px 0;">',
-        '<div style="font-size:48px;margin-bottom:12px;">📱</div>',
-        '<h3 style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:10px;">Install GreenHarvest</h3>',
-        '<p style="font-size:14px;color:#475569;margin-bottom:16px;line-height:1.6;">To install on your iPhone or iPad:</p>',
-        '<ol style="text-align:left;font-size:14px;color:#334155;line-height:2;padding-left:20px;">',
-        '<li>Tap the <strong>Share</strong> button &#x2015; <span style="font-size:18px;">⎋</span> at the bottom of Safari</li>',
-        '<li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>',
-        '<li>Tap <strong>"Add"</strong> in the top-right corner</li>',
-        '</ol>',
+        '<div style="font-size:52px;margin-bottom:14px;">\uD83D\uDCF1</div>',
+        '<h3 style="font-size:19px;font-weight:800;color:#0f172a;margin-bottom:8px;">Install GreenHarvest</h3>',
+        '<p style="font-size:14px;color:#475569;margin-bottom:18px;line-height:1.6;">Add GreenHarvest to your iPhone or iPad home screen:</p>',
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:16px;text-align:left;">',
+        '<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">',
+        '<span style="background:#16a34a;color:white;border-radius:50%;width:24px;height:24px;min-width:24px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">1</span>',
+        '<span style="font-size:14px;color:#334155;line-height:1.5;">Tap the <strong>Share</strong> button \u238B at the bottom of Safari</span>',
+        '</div>',
+        '<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">',
+        '<span style="background:#16a34a;color:white;border-radius:50%;width:24px;height:24px;min-width:24px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">2</span>',
+        '<span style="font-size:14px;color:#334155;line-height:1.5;">Scroll down and tap <strong>"Add to Home Screen"</strong></span>',
+        '</div>',
+        '<div style="display:flex;align-items:flex-start;gap:12px;">',
+        '<span style="background:#16a34a;color:white;border-radius:50%;width:24px;height:24px;min-width:24px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;">3</span>',
+        '<span style="font-size:14px;color:#334155;line-height:1.5;">Tap <strong>"Add"</strong> in the top-right corner</span>',
+        '</div>',
+        '</div>',
         '<div style="margin-top:16px;padding:12px;background:#f0fdf4;border-radius:12px;font-size:13px;color:#15803d;font-weight:600;">',
-        '🥬 GreenHarvest will appear on your home screen!',
+        '\uD83E\uDD6C GreenHarvest will appear on your home screen!',
         '</div>',
         '</div>'
       ].join('');
@@ -273,13 +313,21 @@ require_once 'config.php';
     _showBrowserInstructions: function() {
       var html = [
         '<div style="text-align:center;padding:8px 0;">',
-        '<div style="font-size:48px;margin-bottom:12px;">💻</div>',
-        '<h3 style="font-size:18px;font-weight:800;color:#0f172a;margin-bottom:10px;">Install GreenHarvest</h3>',
-        '<p style="font-size:14px;color:#475569;margin-bottom:16px;line-height:1.6;">',
-        'To install GreenHarvest, look for the install icon in your browser address bar, or open the browser menu and select <strong>"Install App"</strong> or <strong>"Add to Home Screen"</strong>.',
-        '</p>',
-        '<div style="padding:12px;background:#f0fdf4;border-radius:12px;font-size:13px;color:#15803d;font-weight:600;">',
-        '🥬 Best experience: Use Chrome on Android or Chrome/Edge on desktop.',
+        '<div style="font-size:52px;margin-bottom:14px;">\uD83D\uDCBB</div>',
+        '<h3 style="font-size:19px;font-weight:800;color:#0f172a;margin-bottom:8px;">Install GreenHarvest</h3>',
+        '<p style="font-size:14px;color:#475569;margin-bottom:18px;line-height:1.6;">Install GreenHarvest as an app on your device:</p>',
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:16px;text-align:left;">',
+        '<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">',
+        '<span style="font-size:20px;">\uD83C\uDF10</span>',
+        '<span style="font-size:14px;color:#334155;line-height:1.5;"><strong>Chrome / Edge:</strong> Look for the install icon in the address bar, or open the browser menu &rarr; <strong>"Install app"</strong></span>',
+        '</div>',
+        '<div style="display:flex;align-items:flex-start;gap:12px;">',
+        '<span style="font-size:20px;">\uD83D\uDCF1</span>',
+        '<span style="font-size:14px;color:#334155;line-height:1.5;"><strong>Android Chrome:</strong> Tap the 3-dot menu &rarr; <strong>"Add to Home screen"</strong></span>',
+        '</div>',
+        '</div>',
+        '<div style="margin-top:16px;padding:12px;background:#f0fdf4;border-radius:12px;font-size:13px;color:#15803d;font-weight:600;">',
+        '\uD83E\uDD6C Best experience: Chrome on Android or Chrome/Edge on desktop.',
         '</div>',
         '</div>'
       ].join('');

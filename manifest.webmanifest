@@ -5,12 +5,27 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
   "orientation": "portrait-primary",
   "theme_color": "#16a34a",
   "background_color": "#f0fdf4",
   "lang": "en",
+  "dir": "ltr",
   "categories": ["food", "shopping", "lifestyle"],
+  "id": "/",
   "icons": [
+    {
+      "src": "/assets/icons/favicon.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/assets/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
     {
       "src": "/assets/icons/icon-192.png",
       "sizes": "192x192",
@@ -44,5 +59,7 @@
       "url": "/",
       "icons": [{ "src": "/assets/icons/icon-192.png", "sizes": "192x192" }]
     }
-  ]
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
 }
