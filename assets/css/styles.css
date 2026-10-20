@@ -1,4 +1,4 @@
-/* assets/css/styles.css - Premium 100% Vegetable Shop Styling */
+﻿/* assets/css/styles.css - Premium 100% Vegetable Shop Styling */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800;900&display=swap');
 
 :root {
@@ -176,98 +176,23 @@ img { display: block; max-width: 100%; height: auto; }
 
 .btn-guest-register:active { transform: translateY(0); box-shadow: none; }
 
-/* ─── SIDE MENU OVERLAY ──────────────────────── */
-.side-menu-overlay {
-  display: none;
-  position: fixed; inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  z-index: 800;
-  animation: fadeInOverlay .25s ease forwards;
-}
-.side-menu-overlay.open { display: block; }
-
-@keyframes fadeInOverlay {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* ─── SIDE MENU DRAWER ───────────────────────── */
-.side-menu-drawer {
-  position: fixed; top: 0; left: 0;
-  width: 280px; height: 100dvh;
-  background: white;
-  z-index: 900;
-  box-shadow: 4px 0 32px rgba(15,23,42,0.14);
-  display: flex; flex-direction: column;
-  transform: translateX(-100%);
-  transition: transform .3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-
-.side-menu-drawer.open {
-  transform: translateX(0);
-  display: flex !important;
-}
-
-.side-menu-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 18px 20px 16px;
-  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
-  border-bottom: 1px solid #bbf7d0;
-  flex-shrink: 0;
-}
-
-.side-menu-close-btn {
-  width: 34px; height: 34px;
-  border-radius: 50%;
-  border: 1.5px solid #d1fae5;
-  background: white;
-  color: #15803d;
-  font-size: 16px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  transition: all .2s ease;
-  flex-shrink: 0;
-}
-
-.side-menu-close-btn:hover {
-  background: #fef2f2;
-  border-color: #fca5a5;
-  color: #dc2626;
-  transform: rotate(90deg);
-}
-
-.side-menu-body {
-  flex: 1; overflow-y: auto;
-  padding: 14px 12px;
-  display: flex; flex-direction: column; gap: 4px;
-}
-
+/* ─── SIDE-NAV-ITEM (legacy alias, kept for compatibility) ─── */
 .side-nav-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px;
+  padding: 11px 14px;
   border-radius: 12px;
-  border: none; background: transparent;
-  color: #1e293b; font-size: 14px; font-weight: 600;
+  border: 1.5px solid transparent; background: transparent;
+  color: #334155; font-size: 14px; font-weight: 600;
   cursor: pointer; text-align: left; width: 100%;
-  transition: all .18s ease;
-  font-family: inherit;
+  transition: all .18s ease; font-family: inherit; min-height: 44px;
 }
-
 .side-nav-item:hover {
-  background: #f0fdf4;
-  color: #16a34a;
-  transform: translateX(4px);
+  background: #f0fdf4; color: #047857; transform: translateX(3px);
 }
-
 .side-nav-item.active {
-  background: linear-gradient(90deg, #f0fdf4, #dcfce7);
-  color: #15803d;
-  border-left: 3px solid #16a34a;
+  background: linear-gradient(90deg, #f0fdf4, #d1fae5);
+  color: #047857; border-left: 3px solid #059669;
 }
-
 .side-nav-item .nav-icon { font-size: 18px; flex-shrink: 0; }
 
 /* ─── BOTTOM NAV (MOBILE) ────────────────────── */
@@ -2286,30 +2211,31 @@ img { display: block; max-width: 100%; height: auto; }
 .notif-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 14px; border-bottom: 1px solid #f1f5f9;
-  flex-shrink: 0; gap: 8px; flex-wrap: wrap;
+  flex-shrink: 0; gap: 6px;
+  flex-wrap: wrap;
 }
 .notif-header-left {
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0;
 }
-.notif-header-title { font-size: 14px; font-weight: 800; color: #0f172a; }
+.notif-header-title { font-size: 14px; font-weight: 800; color: #0f172a; white-space: nowrap; }
 .notif-new-badge {
   background: var(--danger); color: white;
   font-size: 11px; padding: 2px 7px; border-radius: 10px;
-  font-weight: 700; line-height: 1.4;
+  font-weight: 700; line-height: 1.4; white-space: nowrap;
 }
 .notif-header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .notif-sound-btn {
   background: none; border: 1px solid #e2e8f0; border-radius: 8px;
   padding: 4px 8px; cursor: pointer; font-size: 16px; line-height: 1;
-  transition: background .15s;
+  transition: background .15s; flex-shrink: 0;
 }
 .notif-sound-btn:hover { background: #f0fdf4; }
 .notif-clear-btn {
-  background: none; border: 1px solid #fca5a5; border-radius: 8px;
-  padding: 4px 10px; cursor: pointer; font-size: 12px; font-weight: 700;
-  color: #dc2626; transition: all .15s; white-space: nowrap;
+  background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px;
+  padding: 5px 11px; cursor: pointer; font-size: 12px; font-weight: 700;
+  color: #dc2626; transition: all .15s; white-space: nowrap; flex-shrink: 0;
 }
-.notif-clear-btn:hover { background: #fef2f2; }
+.notif-clear-btn:hover { background: #fee2e2; border-color: #f87171; }
 .notif-clear-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Sound bar */
@@ -2331,26 +2257,106 @@ img { display: block; max-width: 100%; height: auto; }
 }
 .notif-test-btn:hover { background: var(--primary-dark); }
 
-/* List */
-.notif-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+/* List — scrolls independently inside the panel */
+.notif-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0; /* CRITICAL: allows flex child to shrink below content height */
+}
 .notif-empty {
   text-align: center; padding: 32px 16px;
   color: #94a3b8; font-size: 13px; line-height: 2;
 }
 
-/* Item */
+/* ─── SWIPE-TO-DELETE WRAPPER ─────────────────── */
+/* Outer wrapper that clips the sliding card */
+.notif-item-wrap {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid #f8fafc;
+}
+/* The card itself — translated on swipe */
 .notif-item {
   display: flex; align-items: flex-start; gap: 8px;
-  padding: 12px 14px; border-bottom: 1px solid #f8fafc;
-  cursor: pointer; transition: background .15s;
-  min-height: 48px; /* touch-friendly */
+  padding: 12px 14px;
+  cursor: pointer; transition: background .15s, transform .25s cubic-bezier(.4,0,.2,1);
+  min-height: 48px;
   outline: none;
+  background: white;
+  position: relative;
+  touch-action: pan-y; /* allow vertical scroll, intercept horizontal */
+  user-select: none;
+  -webkit-user-select: none;
+  border-bottom: none; /* border is on the wrapper now */
 }
 .notif-item:hover, .notif-item:focus { background: #f8fafc; }
 .notif-item:focus-visible { box-shadow: inset 0 0 0 2px var(--primary); }
 .notif-item.unread { background: #f0fdf4; border-left: 3px solid var(--primary); }
 .notif-item.unread:hover { background: #dcfce7; }
-.notif-item-inner { flex: 1; min-width: 0; }
+/* When swiped, card slides to reveal delete button */
+.notif-item.swiped-left  { transform: translateX(-72px); }
+.notif-item.swiped-right { transform: translateX(72px); }
+
+/* Delete button revealed by swipe (positioned behind the card) */
+.notif-delete-btn {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 64px;
+  display: flex; align-items: center; justify-content: center;
+  background: #dc2626;
+  color: white; font-size: 20px;
+  cursor: pointer; border: none;
+  transition: background .15s, opacity .2s;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 0;
+  flex-direction: column;
+  gap: 2px;
+  font-family: inherit;
+}
+.notif-delete-btn span.del-label {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.3px; line-height: 1;
+}
+/* Left swipe reveals button on the RIGHT */
+.notif-delete-btn.right {
+  right: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+/* Right swipe reveals button on the LEFT */
+.notif-delete-btn.left {
+  left: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+/* Show delete button when swiped */
+.notif-item-wrap.swiped-left  .notif-delete-btn.right,
+.notif-item-wrap.swiped-right .notif-delete-btn.left {
+  opacity: 1;
+  pointer-events: auto;
+}
+.notif-delete-btn:hover { background: #b91c1c; }
+.notif-delete-btn:active { background: #991b1b; }
+
+/* Keyboard-accessible delete button inside item (always visible, small) */
+.notif-kb-delete {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; color: #cbd5e1; padding: 6px;
+  border-radius: 6px; transition: all .15s;
+  opacity: 0; pointer-events: none;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.notif-item:hover .notif-kb-delete,
+.notif-item:focus-within .notif-kb-delete {
+  opacity: 1; pointer-events: auto;
+}
+.notif-kb-delete:hover { background: #fef2f2; color: #dc2626; }
+
+.notif-item-inner { flex: 1; min-width: 0; padding-right: 22px; }
 .notif-title { font-size: 13px; font-weight: 700; color: #0f172a; word-break: break-word; line-height: 1.35; }
 .notif-msg { font-size: 12px; color: var(--slate-500); margin-top: 3px; word-break: break-word; line-height: 1.5; }
 .notif-time { font-size: 11px; color: var(--slate-300); margin-top: 4px; }
@@ -2359,6 +2365,12 @@ img { display: block; max-width: 100%; height: auto; }
   align-self: center; transition: color .15s;
 }
 .notif-item:hover .notif-arrow, .notif-item:focus .notif-arrow { color: var(--primary); }
+
+/* Removing animation */
+.notif-item-wrap.removing {
+  transition: max-height .3s ease, opacity .3s ease;
+  overflow: hidden;
+}
 
 /* ─── CHAT ───────────────────────────────────── */
 .chat-bubble { padding: 10px 14px; border-radius: 14px; max-width: 80%; font-size: 13.5px; margin-bottom: 8px; }
@@ -2528,120 +2540,187 @@ img { display: block; max-width: 100%; height: auto; }
   opacity: 1; pointer-events: auto;
 }
 
-/* ─── SIDE MENU DRAWER ───────────────────────── */
+/* ─── SIDE MENU DRAWER ─────────────────────────────────────── */
 .side-menu-drawer {
   position: fixed; top: 0; left: 0;
-  width: min(300px, 86vw); height: 100vh;
+  width: min(300px, 88vw); height: 100dvh;
   background: #ffffff;
   z-index: 600;
-  box-shadow: 12px 0 36px rgba(0,0,0,0.18);
+  box-shadow: 8px 0 48px rgba(15, 23, 42, 0.20);
   display: flex; flex-direction: column;
   transform: translateX(-100%);
-  transition: transform .3s ease;
-  overflow-y: auto; -webkit-overflow-scrolling: touch;
+  transition: transform .3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
 .side-menu-drawer.open {
   transform: translateX(0) !important;
 }
 
+/* ─── HEADER ──────────────────────────────────── */
 .side-menu-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 18px 18px 16px;
+  border-bottom: 1px solid #d1fae5;
   display: flex; align-items: center; justify-content: space-between;
-  background: #f8fafc; flex-shrink: 0;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  flex-shrink: 0; gap: 8px;
 }
+.side-menu-header .brand-logo {
+  display: flex; align-items: center; gap: 10px; text-decoration: none;
+}
+.side-menu-header .brand-icon {
+  font-size: 26px; line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(5,150,105,0.3));
+}
+.side-menu-header .brand-name {
+  font-size: 16px; font-weight: 900; color: #064e3b; letter-spacing: -0.3px;
+}
+.side-menu-header .brand-subtitle {
+  font-size: 10.5px; font-weight: 600; color: #059669; margin-top: 1px;
+}
+
+/* ─── CLOSE BUTTON ────────────────────────────── */
 .side-menu-close-btn {
-  width: 36px; height: 36px; border-radius: 50%;
-  border: none; background: #e2e8f0;
-  color: var(--slate-700); font-size: 17px; font-weight: 700;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1.5px solid #bbf7d0; background: rgba(255,255,255,0.9);
+  color: #15803d; font-size: 16px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all .2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer; transition: all .22s cubic-bezier(0.4,0,0.2,1);
+  flex-shrink: 0; line-height: 1;
 }
 .side-menu-close-btn:hover {
-  background: #fee2e2; color: #dc2626; transform: rotate(90deg);
+  background: #fee2e2; border-color: #fca5a5; color: #dc2626;
+  transform: rotate(90deg) scale(1.1);
 }
-.side-menu-close-btn:active {
-  transform: scale(0.9);
-}
+.side-menu-close-btn:active { transform: scale(0.9); }
 .side-menu-close-btn:focus-visible {
-  outline: 2px solid var(--danger);
-  outline-offset: 2px;
+  outline: 2px solid #dc2626; outline-offset: 2px;
 }
 
+/* ─── BODY ────────────────────────────────────── */
 .side-menu-body {
-  padding: 16px;
-  flex: 1;
-  overflow-y: auto;
-  display: flex; flex-direction: column; gap: 6px;
+  padding: 14px 12px 16px;
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  display: flex; flex-direction: column; gap: 3px;
 }
 
+/* ─── PROFILE CARD ────────────────────────────── */
 .side-menu-profile-card {
-  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
-  border: 1px solid #bbf7d0;
-  border-radius: 14px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 60%, #d1fae5 100%);
+  border: 1px solid #a7f3d0;
+  border-radius: 16px;
   padding: 14px 16px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: transform .15s ease, box-shadow .15s ease;
+  box-shadow: 0 2px 10px rgba(5,150,105,0.08);
+}
+.side-menu-profile-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 18px rgba(5,150,105,0.15);
 }
 .side-menu-profile-card .s-name {
-  font-weight: 800; font-size: 15px; color: var(--dark);
+  font-weight: 800; font-size: 15px; color: #0f172a;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .side-menu-profile-card .s-sub {
-  font-size: 12px; color: var(--slate-500); margin-top: 2px;
+  font-size: 12px; color: #64748b; margin-top: 2px;
 }
 
+/* ─── USER NAME & ROLE (inside profile card) ──── */
+.side-menu-user-name {
+  font-weight: 800; font-size: 15px; color: #0f172a;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.side-menu-user-role {
+  font-size: 12px; font-weight: 600; color: #059669; margin-top: 2px;
+}
+
+/* ─── AVATAR ──────────────────────────────────── */
+.side-menu-avatar-img {
+  width: 48px; height: 48px; border-radius: 50%;
+  object-fit: cover;
+  border: 2.5px solid #059669;
+  box-shadow: 0 2px 8px rgba(5,150,105,0.22);
+  flex-shrink: 0;
+}
+.side-menu-avatar-placeholder {
+  width: 48px; height: 48px; border-radius: 50%;
+  background: linear-gradient(135deg, #059669, #047857);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(5,150,105,0.28);
+}
+
+/* ─── NAV LIST WRAPPER ────────────────────────── */
+.side-menu-nav-list {
+  display: flex; flex-direction: column; gap: 2px; flex: 1;
+}
+
+/* ─── NAV ITEM ────────────────────────────────── */
 .side-menu-nav-item {
   display: flex; align-items: center; gap: 12px;
-  padding: 12px 14px;
+  padding: 11px 14px;
   border-radius: 12px;
-  color: var(--slate-700);
-  font-size: 14px; font-weight: 700;
+  color: #334155;
+  font-size: 14px; font-weight: 600;
   border: 1.5px solid transparent; background: transparent; text-align: left;
-  cursor: pointer; transition: all .18s cubic-bezier(0.4, 0, 0.2, 1); width: 100%;
+  cursor: pointer; transition: all .18s cubic-bezier(0.4,0,0.2,1); width: 100%;
+  font-family: inherit; line-height: 1.3; min-height: 44px;
 }
 .side-menu-nav-item:hover {
-  background: var(--primary-light);
-  color: var(--primary-deep);
-  transform: translateX(4px);
-  border-color: rgba(22, 163, 74, 0.15);
+  background: #f0fdf4; color: #047857;
+  transform: translateX(3px);
+  border-color: rgba(5,150,105,0.18);
 }
 .side-menu-nav-item.active {
-  background: var(--primary-light);
-  color: var(--primary-deep);
-  border-color: rgba(22, 163, 74, 0.3);
+  background: linear-gradient(90deg, #f0fdf4, #d1fae5);
+  color: #047857; border-color: rgba(5,150,105,0.3); font-weight: 700;
 }
-.side-menu-nav-item:active {
-  transform: scale(0.98);
-}
+.side-menu-nav-item.active .icon,
+.side-menu-nav-item.active .s-icon { transform: scale(1.1); }
+.side-menu-nav-item:active { transform: scale(0.98) translateX(0); }
 .side-menu-nav-item:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
+  outline: 2px solid #059669; outline-offset: 1px;
 }
+/* Icon spans used in nav items */
+.side-menu-nav-item .icon,
 .side-menu-nav-item .s-icon {
-  font-size: 19px; width: 24px; text-align: center; flex-shrink: 0;
+  font-size: 18px; width: 24px; text-align: center; flex-shrink: 0;
   transition: transform .2s ease;
 }
-.side-menu-nav-item:hover .s-icon {
-  transform: scale(1.15);
-}
-.side-menu-nav-item.danger {
-  color: #dc2626;
-  margin-top: auto;
-  border-top: 1px solid #f1f5f9;
-  padding-top: 14px;
-}
+.side-menu-nav-item:hover .icon,
+.side-menu-nav-item:hover .s-icon { transform: scale(1.15); }
+
+/* ─── DANGER / SIGN OUT ───────────────────────── */
+.side-menu-nav-item.danger { color: #dc2626; }
 .side-menu-nav-item.danger:hover {
-  background: #fef2f2;
-  border-color: #fca5a5;
-  color: #b91c1c;
-  transform: translateX(4px);
+  background: #fef2f2; border-color: #fca5a5; color: #b91c1c;
+  transform: translateX(3px);
 }
-.side-menu-nav-item.danger:active {
-  transform: scale(0.98);
-}
+.side-menu-nav-item.danger:active { transform: scale(0.98); }
 .side-menu-nav-item.danger:focus-visible {
-  outline: 2px solid var(--danger);
-  outline-offset: 1px;
+  outline: 2px solid #dc2626; outline-offset: 1px;
+}
+
+/* ─── PWA INSTALL ITEM ────────────────────────── */
+.side-menu-nav-item.pwa-install {
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  border-color: rgba(5,150,105,0.25);
+  color: #047857; font-weight: 700;
+}
+.side-menu-nav-item.pwa-install:hover {
+  background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+  border-color: rgba(5,150,105,0.4); color: #065f46;
+  transform: translateX(3px);
+  box-shadow: 0 3px 12px rgba(5,150,105,0.15);
+}
+.side-menu-nav-item.pwa-install:focus-visible {
+  outline: 2px solid #059669; outline-offset: 1px;
+}
+
+/* ─── SECTION DIVIDER ─────────────────────────── */
+.side-menu-divider {
+  height: 1px; background: #e2e8f0; margin: 8px 0; border: none;
 }
 
 /* ─── TABLE RESPONSIVENESS ───────────────────── */
@@ -4349,7 +4428,7 @@ img { display: block; max-width: 100%; height: auto; }
   .notif-panel {
     width: calc(100vw - 28px);
     right: -10px;
-    max-height: 70vh;
+    max-height: 65vh;
   }
 }
 
@@ -4370,19 +4449,28 @@ img { display: block; max-width: 100%; height: auto; }
     border-left: none !important;
     border-right: none !important;
     border-bottom: none !important;
-    max-height: 78vh !important;
+    /* KEY FIX: use dvh (dynamic viewport height) with fallback to avoid
+       address-bar and bottom-nav overlaps on Android Chrome */
+    max-height: 75vh !important;
+    max-height: 75dvh !important;
     box-shadow: 0 -6px 32px rgba(15,23,42,0.18) !important;
     z-index: 700 !important;
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* CRITICAL: must be flex column so .notif-list gets bounded height */
+    display: none;
+    flex-direction: column !important;
+    overflow: hidden !important;
   }
   .notif-panel.open {
     display: flex !important;
-    flex-direction: column !important;
   }
   .notif-header {
     padding: 20px 16px 12px !important;
     border-radius: 20px 20px 0 0;
     position: relative;
+    flex-shrink: 0 !important;
+    /* On narrow screens, stack left and right sections nicely */
+    gap: 8px !important;
   }
   .notif-header::before {
     content: '';
@@ -4393,6 +4481,22 @@ img { display: block; max-width: 100%; height: auto; }
     position: absolute;
     top: 8px; left: 50%; transform: translateX(-50%);
   }
-  .notif-item { min-height: 56px; padding: 14px 16px; }
-  .notif-list { max-height: none; flex: 1; }
+  .notif-header-title { font-size: 13px !important; }
+  .notif-clear-btn { font-size: 11px !important; padding: 5px 9px !important; }
+  .notif-item { min-height: 60px; padding: 14px 16px; }
+  /* CRITICAL: notif-list must scroll, not overflow the panel */
+  .notif-list {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+  /* Swipe delete buttons larger on mobile */
+  .notif-delete-btn {
+    width: 72px !important;
+    font-size: 22px !important;
+  }
+  .notif-item.swiped-left  { transform: translateX(-80px) !important; }
+  .notif-item.swiped-right { transform: translateX(80px) !important; }
 }
