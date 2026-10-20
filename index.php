@@ -79,11 +79,7 @@ require_once 'config.php';
         <span id="cartBadge" class="badge" style="display:none;">0</span>
       </button>
 
-      <!-- PWA Install App Button -->
-      <button id="pwaInstallBtn" class="btn-pwa-install" title="Install GreenHarvest App" style="display:none;" onclick="GH_PWA.promptInstall()">
-        <span class="pwa-install-icon">📲</span>
-        <span class="pwa-install-label">Install App</span>
-      </button>
+      <!-- PWA Install App: available exclusively in the side navigation menu -->
 
     </div>
   </div>
@@ -244,13 +240,12 @@ require_once 'config.php';
     },
 
     _showInstallBtn: function() {
-      var btn = document.getElementById('pwaInstallBtn');
-      if (btn) btn.style.display = 'flex';
+      // Install button removed from header — install option is in side menu only.
+      // Side menu's _pwaInstallSideBtn() handles visibility automatically.
     },
 
     _hideInstallBtn: function() {
-      var btn = document.getElementById('pwaInstallBtn');
-      if (btn) btn.style.display = 'none';
+      // Install button removed from header — no action needed.
     },
 
     _showUpdateToast: function() {
@@ -337,16 +332,10 @@ require_once 'config.php';
     }
   };
 
-  // iOS: always show install button in Safari (no beforeinstallprompt)
+  // iOS Safari: The side navigation menu's Install App item handles
+  // iOS installation instructions via GH_PWA.promptInstall() — no header button needed.
   document.addEventListener('DOMContentLoaded', function() {
     GH_PWA.init();
-
-    // On iOS Safari, show install button manually if not already installed
-    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    var isStandalone = window.navigator.standalone === true;
-    if (isIOS && !isStandalone) {
-      GH_PWA._showInstallBtn();
-    }
   });
 })();
 </script>
