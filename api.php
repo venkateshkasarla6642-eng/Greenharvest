@@ -1479,6 +1479,150 @@ switch ($action) {
         ]);
         break;
 
+    // ─── REAL-TIME DELIVERY GPS TRACKING ─────────────────────────────────────
+    // Ensure the delivery_tracking table exists (idempotent; runs once per cold start).
+    case 'ensure_tracking_table':
+        checkShopkeeperRole();
+        try {
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS delivery_tracking (
+                    id         SERIAL PRIMARY KEY,
+                    order_id   INT NOT NULL UNIQUE,
+                    latitude   DOUBLE PRECISION NOT NULL,
+                    longitude  DOUBLE PRECISION NOT NULL,
+                    accuracy   DOUBLE PRECISION DEFAULT NULL,
+                    heading    DOUBLE PRECISION DEFAULT NULL,
+                    speed      DOUBLE PRECISION DEFAULT NULL,
+                    is_active  SMALLINT NOT NULL DEFAULT 1,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_dt_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+                )
+            ");
+            $db->exec("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order ON delivery_tracking(order_id)");
+        } catch (Exception $e) { /* table already exists */ }
+        jsonResponse(['success' => true]);
+        break;
+
+    // POST — shopkeeper device pushes its GPS location for an active OutForDelivery order.
+    case 'update_delivery_location':
+        $sk = checkShopkeeperRole();
+
+        $raw  = file_get_contents('php://input');
+        $body = json_decode($raw, true) ?? [];
+        $orderId  = intval($body['order_id']  ?? $_POST['order_id']  ?? 0);
+        $lat      = isset($body['latitude'])  ? floatval($body['latitude'])  : (isset($_POST['latitude'])  ? floatval($_POST['latitude'])  : null);
+        $lng      = isset($body['longitude']) ? floatval($body['longitude']) : (isset($_POST['longitude']) ? floatval($_POST['longitude']) : null);
+        $accuracy = isset($body['accuracy'])  ? floatval($body['accuracy'])  : null;
+        $heading  = isset($body['heading'])   ? floatval($body['heading'])   : null;
+        $speed    = isset($body['speed'])     ? floatval($body['speed'])     : null;
+
+        // Validate inputs
+        if ($orderId <= 0 || $lat === null || $lng === null) {
+            jsonResponse(['error' => 'order_id, latitude and longitude are required.'], 400);
+        }
+        if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180) {
+            jsonResponse(['error' => 'Invalid GPS coordinates.'], 400);
+        }
+
+        // Verify order exists and is OutForDelivery
+        $stmtOrd = $db->prepare("SELECT id, order_status FROM orders WHERE id = ?");
+        $stmtOrd->execute([$orderId]);
+        $ord = $stmtOrd->fetch();
+
+        if (!$ord) {
+            jsonResponse(['error' => 'Order not found.'], 404);
+        }
+        if ($ord['order_status'] !== 'OutForDelivery') {
+            jsonResponse(['error' => 'Location tracking is only active for orders that are Out for Delivery.'], 400);
+        }
+
+        // Ensure table exists (handles first-ever call on fresh DB)
+        try {
+            $db->exec("
+                CREATE TABLE IF NOT EXISTS delivery_tracking (
+                    id SERIAL PRIMARY KEY, order_id INT NOT NULL UNIQUE,
+                    latitude DOUBLE PRECISION NOT NULL, longitude DOUBLE PRECISION NOT NULL,
+                    accuracy DOUBLE PRECISION DEFAULT NULL, heading DOUBLE PRECISION DEFAULT NULL,
+                    speed DOUBLE PRECISION DEFAULT NULL, is_active SMALLINT NOT NULL DEFAULT 1,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    CONSTRAINT fk_dt_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+                )
+            ");
+            $db->exec("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order ON delivery_tracking(order_id)");
+        } catch (Exception $e) {}
+
+        // UPSERT: insert on first call, update on subsequent calls (PostgreSQL ON CONFLICT)
+        $stmtUp = $db->prepare("
+            INSERT INTO delivery_tracking (order_id, latitude, longitude, accuracy, heading, speed, is_active, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT (order_id)
+            DO UPDATE SET
+                latitude   = EXCLUDED.latitude,
+                longitude  = EXCLUDED.longitude,
+                accuracy   = EXCLUDED.accuracy,
+                heading    = EXCLUDED.heading,
+                speed      = EXCLUDED.speed,
+                is_active  = 1,
+                updated_at = CURRENT_TIMESTAMP
+        ");
+        $stmtUp->execute([$orderId, $lat, $lng, $accuracy, $heading, $speed]);
+
+        jsonResponse(['success' => true, 'updated_at' => date('c')]);
+        break;
+
+    // GET — customer polls for the current GPS position of their delivery.
+    case 'get_delivery_location':
+        $authU = checkAuthUser();
+
+        $orderId = intval($_GET['order_id'] ?? 0);
+        if ($orderId <= 0) {
+            jsonResponse(['error' => 'order_id is required.'], 400);
+        }
+
+        // Security: customers may only query their own orders
+        $stmtOrd = $db->prepare("SELECT id, order_status, customer_id FROM orders WHERE id = ?");
+        $stmtOrd->execute([$orderId]);
+        $ord = $stmtOrd->fetch();
+
+        if (!$ord) {
+            jsonResponse(['error' => 'Order not found.'], 404);
+        }
+        if ($authU['role'] === 'customer' && $ord['customer_id'] != $authU['id']) {
+            jsonResponse(['error' => 'Access denied: this order does not belong to you.'], 403);
+        }
+
+        // Fetch tracking row (table may not exist on fresh installs)
+        $trackRow = null;
+        try {
+            $stmtTr = $db->prepare("SELECT latitude, longitude, accuracy, heading, speed, is_active, updated_at FROM delivery_tracking WHERE order_id = ?");
+            $stmtTr->execute([$orderId]);
+            $trackRow = $stmtTr->fetch();
+        } catch (Exception $e) {
+            // Table not yet created — just return null tracking
+        }
+
+        jsonResponse([
+            'order_status' => $ord['order_status'],
+            'tracking'     => $trackRow ?: null
+        ]);
+        break;
+
+    // POST — shopkeeper signals end of location sharing (called on Delivered / Rejected / Cancelled).
+    case 'stop_delivery_tracking':
+        $sk = checkShopkeeperRole();
+        $orderId = intval($_POST['order_id'] ?? 0);
+        if ($orderId <= 0) {
+            jsonResponse(['error' => 'order_id is required.'], 400);
+        }
+        try {
+            $db->prepare("UPDATE delivery_tracking SET is_active = 0 WHERE order_id = ?")
+               ->execute([$orderId]);
+        } catch (Exception $e) {}
+        jsonResponse(['success' => true]);
+        break;
+
     default:
         jsonResponse(['error' => 'Invalid action parameter'], 400);
         break;

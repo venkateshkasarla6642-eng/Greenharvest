@@ -26,6 +26,10 @@ require_once 'config.php';
   <link rel="stylesheet" href="assets/css/styles.css?v=<?php echo filemtime(__DIR__ . '/assets/css/styles.css'); ?>">
   <!-- Canvas Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Google Maps API key (set GOOGLE_MAPS_API_KEY env var in Render dashboard) -->
+  <script>
+    window.GH_MAPS_API_KEY = <?php echo json_encode(getenv('GOOGLE_MAPS_API_KEY') ?: 'YOUR_GOOGLE_MAPS_API_KEY'); ?>;
+  </script>
 </head>
 <body>
 
@@ -409,6 +413,20 @@ require_once 'config.php';
     GH_PWA.init();
   });
 })();
+</script>
+
+<!-- Stop live tracking polling when modal overlay is dismissed -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var ov = document.getElementById('modalOverlay');
+  if (ov) {
+    ov.addEventListener('click', function(e) {
+      if (e.target === ov && window.App && App.stopLiveTracking) {
+        App.stopLiveTracking();
+      }
+    });
+  }
+});
 </script>
 
 </body>

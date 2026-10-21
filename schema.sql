@@ -184,3 +184,34 @@ CREATE TABLE IF NOT EXISTS customer_addresses (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (customer_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- Real-Time Delivery GPS Tracking table
+-- One row per order; upserted on every GPS update from the shopkeeper device.
+CREATE TABLE IF NOT EXISTS delivery_tracking (
+  id         SERIAL PRIMARY KEY,
+  order_id   INT NOT NULL UNIQUE,
+  latitude   DOUBLE PRECISION NOT NULL,
+  longitude  DOUBLE PRECISION NOT NULL,
+  accuracy   DOUBLE PRECISION DEFAULT NULL,
+  heading    DOUBLE PRECISION DEFAULT NULL,
+  speed      DOUBLE PRECISION DEFAULT NULL,
+  is_active  SMALLINT NOT NULL DEFAULT 1,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_dt_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order ON delivery_tracking(order_id);
+
+CREATE OR REPLACE FUNCTION update_delivery_tracking_ts()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS delivery_tracking_ts_trigger ON delivery_tracking;
+CREATE TRIGGER delivery_tracking_ts_trigger
+  BEFORE UPDATE ON delivery_tracking
+  FOR EACH ROW EXECUTE FUNCTION update_delivery_tracking_ts();

@@ -1,4 +1,4 @@
-﻿// assets/js/app.js — GreenHarvest Vegetable Shop — Full Application Logic
+// assets/js/app.js — GreenHarvest Vegetable Shop — Full Application Logic
 // 100% Vegetables Only | Customer + Shopkeeper | Real-time
 
 'use strict';
@@ -526,20 +526,43 @@ const App = (() => {
     fire(0.10, { spread: 120, startVelocity: 45 });
   }
 
-  // ───────────────────────────────────────────────
-  // LIVE ORDER TRACKING
-  // ───────────────────────────────────────────────
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // LIVE ORDER TRACKING  (with Google Maps real-time GPS)
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Tracking state (scoped to module â€” reset each time modal opens)
+  let _trackingTimer = null;
+  let _trackingMapObj = null;
+  let _trackingMarkerObj = null;
+  let _destMarkerObj = null;
+  let _directionsRendererObj = null;
+  let _mapInitialized = false;
+  let _lastRouteDrawLat = null;
+  let _lastRouteDrawLng = null;
+
+  function stopLiveTracking() {
+    if (_trackingTimer) { clearInterval(_trackingTimer); _trackingTimer = null; }
+  }
+
   async function trackOrder(orderId) {
+    stopLiveTracking();
+    _trackingMapObj = null;
+    _trackingMarkerObj = null;
+    _destMarkerObj = null;
+    _directionsRendererObj = null;
+    _mapInitialized = false;
+    _lastRouteDrawLat = null;
+    _lastRouteDrawLng = null;
+
     const data = await api('get_order_details', { id: orderId });
     const ord = data.order;
     if (!ord) { toast('Order not found', 'error'); return; }
 
     const steps = [
-      { key: 'Placed',         label: 'Order Placed ✓',                  desc: 'We received your vegetable order.' },
-      { key: 'Accepted',       label: 'Order Accepted ✓',                desc: 'Shopkeeper confirmed your order.' },
-      { key: 'Preparing',      label: 'Vegetables Being Prepared 🥬',    desc: 'Fresh veggies picked & packed for you.' },
-      { key: 'OutForDelivery', label: 'Out for Delivery 🛵',             desc: 'Rider is heading to your location.' },
-      { key: 'Delivered',      label: 'Delivered 🎉',                    desc: 'Fresh veggies delivered. Enjoy!' }
+      { key: 'Placed',         label: 'Order Placed \u2713',                    desc: 'We received your vegetable order.' },
+      { key: 'Accepted',       label: 'Order Accepted \u2713',                  desc: 'Shopkeeper confirmed your order.' },
+      { key: 'Preparing',      label: 'Vegetables Being Prepared \U0001F96C',   desc: 'Fresh veggies picked & packed for you.' },
+      { key: 'OutForDelivery', label: 'Out for Delivery \U0001F6F5',            desc: 'Rider is heading to your location.' },
+      { key: 'Delivered',      label: 'Delivered \U0001F389',                   desc: 'Fresh veggies delivered. Enjoy!' }
     ];
 
     const statusOrder = { Placed:0, Accepted:1, Preparing:2, OutForDelivery:3, Delivered:4, Rejected:-1, Cancelled:-1 };
@@ -549,69 +572,302 @@ const App = (() => {
       const cls = i < curIdx ? 'done' : i === curIdx ? 'current' : '';
       return `<div class="t-step ${cls}">
         <div class="t-dot"></div>
-        <div class="t-info">
-          <h4>${s.label}</h4>
-          <p>${s.desc}</p>
-        </div>
+        <div class="t-info"><h4>${s.label}</h4><p>${s.desc}</p></div>
       </div>`;
     }).join('');
 
     const reviewSection = ord.order_status === 'Delivered' && !ord.review ? `
       <button class="btn-primary w-full mt-3" onclick="App.openReview(${ord.id})" style="background:var(--accent);">
-        ⭐ Rate Your Experience
-      </button>
-    ` : '';
+        \u2B50 Rate Your Experience
+      </button>` : '';
 
     const rejectSection = ord.order_status === 'Rejected' ? `
-      <div style="background:var(--danger-light); border-radius:10px; padding:12px; margin-top:12px; color:var(--danger); font-size:13.5px;">
-        ❌ Order Rejected: ${escapeHtml(ord.rejection_reason || 'Contact shop for details')}
-      </div>
-    ` : '';
+      <div style="background:var(--danger-light);border-radius:10px;padding:12px;margin-top:12px;color:var(--danger);font-size:13.5px;">
+        \u274C Order Rejected: ${escapeHtml(ord.rejection_reason || 'Contact shop for details')}
+      </div>` : '';
 
     const cancelSection = ord.order_status === 'Placed' ? `
       <button class="btn-danger w-full mt-3" onclick="Modal.hide(); App.cancelCustomerOrder(${ord.id}, '${escapeHtml(ord.order_number)}');">
-        ✕ Cancel Order
-      </button>
-    ` : '';
+        \u2715 Cancel Order
+      </button>` : '';
 
     const cancelledNotice = ord.order_status === 'Cancelled' ? `
-      <div style="background:#fee2e2; border:1px solid #fca5a5; border-radius:10px; padding:12px; margin-top:12px; color:#b91c1c; font-size:13.5px; font-weight:700;">
-        ❌ This order was cancelled. (${escapeHtml(ord.rejection_reason || 'Cancelled by customer')})
-      </div>
-    ` : '';
+      <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px;margin-top:12px;color:#b91c1c;font-size:13.5px;font-weight:700;">
+        \u274C This order was cancelled. (${escapeHtml(ord.rejection_reason || 'Cancelled by customer')})
+      </div>` : '';
 
-    const acceptedNotice = ['Accepted', 'Preparing', 'OutForDelivery'].includes(ord.order_status) ? `
+    const acceptedNotice = ['Accepted','Preparing','OutForDelivery'].includes(ord.order_status) ? `
       <div class="order-accepted-notice" style="margin-top:12px;">
-        🔒 This order has been accepted by the shopkeeper and can no longer be cancelled.
-      </div>
-    ` : '';
+        \U0001F512 This order has been accepted by the shopkeeper and can no longer be cancelled.
+      </div>` : '';
+
+    // Google Maps live tracking block â€” shown only while OutForDelivery
+    const mapsSection = ord.order_status === 'OutForDelivery' ? `
+      <div id="gh-map-section" style="margin:14px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-weight:800;font-size:14px;color:var(--primary-deep);">\U0001F4CD Live Delivery Map</div>
+          <div id="gh-map-badge" style="font-size:11px;background:#fff7ed;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:3px 10px;font-weight:700;">Loading...</div>
+        </div>
+        <div id="gh-delivery-map" style="width:100%;height:260px;border-radius:12px;background:#f1f5f9;border:1px solid #e2e8f0;overflow:hidden;position:relative;">
+          <div id="gh-map-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#64748b;font-size:13px;">
+            <div style="font-size:32px;">\U0001F5FA\uFE0F</div><div>Locating delivery person...</div>
+          </div>
+        </div>
+        <div id="gh-map-eta" style="display:none;margin-top:8px;background:#f0fdf4;border-radius:8px;padding:8px 12px;font-size:13px;border:1px solid #d1fae5;">
+          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+            <span>\U0001F4CF Distance: <strong id="gh-eta-dist">--</strong></span>
+            <span>\u23F1\uFE0F ETA: <strong id="gh-eta-time">--</strong></span>
+            <span style="color:#64748b;font-size:11px;">\U0001F550 Updated: <span id="gh-last-upd">--</span></span>
+          </div>
+        </div>
+        <div id="gh-map-fallback" style="display:none;margin-top:8px;background:#fff7ed;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#92400e;border:1px solid #fde68a;">
+          \u26A0\uFE0F Location not yet available. The delivery person will begin sharing their location shortly.
+        </div>
+      </div>` : '';
 
     Modal.show(`
       <div class="flex justify-between items-center mb-3">
-        <h2>🛵 Live Order Tracking</h2>
-        <span style="background:var(--primary-light); padding:5px 14px; border-radius:20px; font-weight:800; color:var(--primary-deep);">${escapeHtml(ord.order_number)}</span>
+        <h2>\U0001F6F5 Live Order Tracking</h2>
+        <span style="background:var(--primary-light);padding:5px 14px;border-radius:20px;font-weight:800;color:var(--primary-deep);">${escapeHtml(ord.order_number)}</span>
       </div>
-
-      <div style="background:#f8fafc; border-radius:10px; padding:10px 14px; font-size:13px; margin-bottom:16px;">
+      <div style="background:#f8fafc;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;">
         <div class="flex justify-between"><span class="text-muted">Customer:</span><strong>${escapeHtml(ord.customer_name)}</strong></div>
         <div class="flex justify-between mt-1"><span class="text-muted">Total:</span><strong>${rupee(ord.total_amount)}</strong></div>
         <div class="flex justify-between mt-1"><span class="text-muted">Payment:</span><strong>${escapeHtml(ord.payment_method)} (${escapeHtml(ord.payment_status)})</strong></div>
-        <div class="flex justify-between mt-1"><span class="text-muted">Delivery Address:</span><strong style="text-align:right; max-width:60%;">${escapeHtml(ord.delivery_address)}</strong></div>
+        <div class="flex justify-between mt-1"><span class="text-muted">Delivery Address:</span><strong style="text-align:right;max-width:60%;">${escapeHtml(ord.delivery_address)}</strong></div>
       </div>
-
-      <div class="tracking-wrap">
-        <div class="tracking-timeline">${stepsHtml}</div>
-      </div>
+      ${mapsSection}
+      <div class="tracking-wrap"><div class="tracking-timeline">${stepsHtml}</div></div>
       ${rejectSection}
       ${cancelledNotice}
       ${acceptedNotice}
       ${reviewSection}
       ${cancelSection}
-
-      <button class="btn-outline w-full mt-3" onclick="App.openChat()">
-        💬 Chat with Shopkeeper
-      </button>
+      <button class="btn-outline w-full mt-3" onclick="App.openChat()">\U0001F4AC Chat with Shopkeeper</button>
     `);
+
+    if (ord.order_status === 'OutForDelivery') {
+      _startCustomerMapTracking(ord);
+    }
+  }
+
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // CUSTOMER LIVE MAP ENGINE
+  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  function _mapsApiKey() {
+    return window.GH_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
+  }
+
+  function _loadGoogleMapsScript() {
+    return new Promise((resolve, reject) => {
+      if (window.google && window.google.maps) { resolve(); return; }
+      // Avoid loading twice if a script tag already exists
+      if (document.querySelector('script[data-gh-maps]')) {
+        const poll = setInterval(() => {
+          if (window.google && window.google.maps) { clearInterval(poll); resolve(); }
+        }, 100);
+        setTimeout(() => { clearInterval(poll); reject(new Error('Maps timeout')); }, 15000);
+        return;
+      }
+      const s = document.createElement('script');
+      s.setAttribute('data-gh-maps', '1');
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${_mapsApiKey()}&libraries=places`;
+      s.async = true;
+      s.defer = true;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('Maps script load failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function _setBadge(text, theme) {
+    const b = document.getElementById('gh-map-badge');
+    if (!b) return;
+    b.textContent = text;
+    if (theme === 'green') {
+      b.style.cssText = 'font-size:11px;background:#f0fdf4;color:#166534;border:1px solid #86efac;border-radius:20px;padding:3px 10px;font-weight:700;';
+    } else if (theme === 'amber') {
+      b.style.cssText = 'font-size:11px;background:#fff7ed;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:3px 10px;font-weight:700;';
+    } else {
+      b.style.cssText = 'font-size:11px;background:#fef2f2;color:#b91c1c;border:1px solid #fca5a5;border-radius:20px;padding:3px 10px;font-weight:700;';
+    }
+  }
+
+  function _timeAgoShort(iso) {
+    if (!iso) return '--';
+    const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (sec < 60) return sec + 's ago';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+    return Math.floor(sec / 3600) + 'h ago';
+  }
+
+  function _haversineMeters(la1, lo1, la2, lo2) {
+    const R = 6371000, toR = Math.PI / 180;
+    const dLat = (la2 - la1) * toR, dLng = (lo2 - lo1) * toR;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(la1 * toR) * Math.cos(la2 * toR) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  async function _initMap(lat, lng, destAddress) {
+    await _loadGoogleMapsScript();
+    const G = window.google.maps;
+    const mapEl = document.getElementById('gh-delivery-map');
+    if (!mapEl) return;
+
+    const center = { lat, lng };
+    _trackingMapObj = new G.Map(mapEl, {
+      center, zoom: 15,
+      mapTypeControl: false, streetViewControl: false,
+      fullscreenControl: true, zoomControl: true,
+      styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }]
+    });
+
+    const deliverySvg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 42 42"><circle cx="21" cy="21" r="20" fill="#16a34a" stroke="white" stroke-width="2.5"/><text x="21" y="28" text-anchor="middle" font-size="22">\U0001F6F5</text></svg>`);
+    const destSvg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42"><path d="M16 0C7.163 0 0 7.163 0 16c0 12 16 26 16 26S32 28 32 16C32 7.163 24.837 0 16 0z" fill="#ef4444"/><circle cx="16" cy="16" r="7" fill="white"/><circle cx="16" cy="16" r="4" fill="#ef4444"/></svg>`);
+
+    _trackingMarkerObj = new G.Marker({
+      position: center, map: _trackingMapObj, title: 'Delivery Person',
+      icon: { url: `data:image/svg+xml;charset=UTF-8,${deliverySvg}`, scaledSize: new G.Size(42, 42), anchor: new G.Point(21, 21) },
+      animation: G.Animation.DROP, zIndex: 10
+    });
+    _destMarkerObj = new G.Marker({
+      position: center, map: _trackingMapObj, title: 'Your Delivery Address',
+      icon: { url: `data:image/svg+xml;charset=UTF-8,${destSvg}`, scaledSize: new G.Size(32, 42), anchor: new G.Point(16, 42) },
+      animation: G.Animation.DROP, zIndex: 5
+    });
+
+    // Geocode delivery address
+    if (destAddress) {
+      const geocoder = new G.Geocoder();
+      geocoder.geocode({ address: destAddress + ', India' }, (results, status) => {
+        if (status === 'OK' && results[0] && _destMarkerObj) {
+          const pos = results[0].geometry.location;
+          _destMarkerObj.setPosition(pos);
+          if (_trackingMapObj) {
+            const bounds = new G.LatLngBounds(new G.LatLng(lat, lng), pos);
+            _trackingMapObj.fitBounds(bounds);
+          }
+          _drawRoute(new G.LatLng(lat, lng), pos);
+          _lastRouteDrawLat = lat; _lastRouteDrawLng = lng;
+        }
+      });
+    }
+  }
+
+  function _drawRoute(origin, destination) {
+    if (!window.google || !window.google.maps || !_trackingMapObj) return;
+    const G = window.google.maps;
+    if (!_directionsRendererObj) {
+      _directionsRendererObj = new G.DirectionsRenderer({
+        suppressMarkers: true,
+        polylineOptions: { strokeColor: '#16a34a', strokeWeight: 4, strokeOpacity: 0.8 }
+      });
+      _directionsRendererObj.setMap(_trackingMapObj);
+    }
+    new G.DirectionsService().route(
+      { origin, destination, travelMode: G.TravelMode.DRIVING },
+      (result, status) => {
+        if (status === 'OK' && _directionsRendererObj) {
+          _directionsRendererObj.setDirections(result);
+          const leg = result.routes[0]?.legs[0];
+          const etaEl = document.getElementById('gh-map-eta');
+          if (etaEl && leg) {
+            etaEl.style.display = 'block';
+            const d = document.getElementById('gh-eta-dist');
+            const t = document.getElementById('gh-eta-time');
+            if (d) d.textContent = leg.distance.text;
+            if (t) t.textContent = leg.duration.text;
+          }
+        }
+      }
+    );
+  }
+
+  function _smoothMoveMarker(lat, lng) {
+    if (!_trackingMarkerObj || !window.google) return;
+    const G = window.google.maps;
+    const cur = _trackingMarkerObj.getPosition();
+    const steps = 60, dLat = (lat - cur.lat()) / steps, dLng = (lng - cur.lng()) / steps;
+    let i = 0;
+    const tick = setInterval(() => {
+      if (!_trackingMarkerObj) { clearInterval(tick); return; }
+      i++;
+      if (i > steps) { clearInterval(tick); return; }
+      _trackingMarkerObj.setPosition(new G.LatLng(cur.lat() + dLat * i, cur.lng() + dLng * i));
+    }, 16);
+  }
+
+  async function _startCustomerMapTracking(ord) {
+    stopLiveTracking();
+
+    async function pollOnce() {
+      const mapEl = document.getElementById('gh-delivery-map');
+      if (!mapEl) { stopLiveTracking(); return; } // modal closed
+
+      let res;
+      try { res = await api('get_delivery_location', { order_id: ord.id }); }
+      catch(e) { return; }
+
+      // Stop if no longer out for delivery
+      if (res.order_status && res.order_status !== 'OutForDelivery') {
+        stopLiveTracking();
+        if (res.order_status === 'Delivered') _setBadge('\u2705 Delivered!', 'green');
+        return;
+      }
+
+      const t = res.tracking;
+      const fallbackEl = document.getElementById('gh-map-fallback');
+      const placeholder = document.getElementById('gh-map-placeholder');
+
+      if (!t || !t.latitude || !t.longitude) {
+        if (!_mapInitialized) {
+          if (placeholder) placeholder.innerHTML = '<div style="font-size:28px">\U0001F50D</div><div>Waiting for delivery location...</div>';
+          if (fallbackEl) fallbackEl.style.display = 'block';
+          _setBadge('\u23F3 Waiting for location...', 'amber');
+        }
+        return;
+      }
+
+      const lat = parseFloat(t.latitude), lng = parseFloat(t.longitude);
+      const stale = (Date.now() - new Date(t.updated_at).getTime()) > 5 * 60 * 1000;
+      const updEl = document.getElementById('gh-last-upd');
+      if (updEl) updEl.textContent = _timeAgoShort(t.updated_at);
+
+      if (!t.is_active || stale) {
+        _setBadge('\U0001F550 Last seen: ' + _timeAgoShort(t.updated_at), 'amber');
+      } else {
+        _setBadge('\U0001F7E2 Live location', 'green');
+      }
+
+      if (fallbackEl) fallbackEl.style.display = 'none';
+
+      if (!_mapInitialized) {
+        _mapInitialized = true;
+        if (placeholder) placeholder.style.display = 'none';
+        try {
+          await _initMap(lat, lng, ord.delivery_address || '');
+        } catch(e) {
+          // Maps API failed (bad key, network) â€” show friendly fallback
+          if (placeholder) placeholder.innerHTML = `<div style="font-size:24px">\U0001F5FA\uFE0F</div><div style="font-size:12px;color:#ef4444;padding:0 12px;text-align:center;">Map unavailable.<br>Check your Google Maps API key.</div>`;
+          _setBadge('\u26A0\uFE0F Map unavailable', 'red');
+          stopLiveTracking();
+        }
+      } else if (_trackingMarkerObj && _trackingMapObj && window.google) {
+        _smoothMoveMarker(lat, lng);
+        _trackingMapObj.panTo(new window.google.maps.LatLng(lat, lng));
+
+        if (_lastRouteDrawLat !== null && _destMarkerObj) {
+          const moved = _haversineMeters(lat, lng, _lastRouteDrawLat, _lastRouteDrawLng);
+          if (moved > 150) {
+            _drawRoute(new window.google.maps.LatLng(lat, lng), _destMarkerObj.getPosition());
+            _lastRouteDrawLat = lat; _lastRouteDrawLng = lng;
+          }
+        }
+      }
+    }
+
+    pollOnce();
+    _trackingTimer = setInterval(pollOnce, 8000);
   }
 
   // ───────────────────────────────────────────────
@@ -2869,7 +3125,12 @@ const App = (() => {
             ` : ''}
             ${o.order_status === 'Accepted' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Preparing'); Modal.hide();">🥬 Start Preparing</button>` : ''}
             ${o.order_status === 'Preparing' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'OutForDelivery'); Modal.hide();">🛵 Out for Delivery</button>` : ''}
-            ${o.order_status === 'OutForDelivery' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Delivered'); Modal.hide();">🎉 Mark Delivered</button>` : ''}
+            ${o.order_status === 'OutForDelivery' ? `
+              <button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Delivered'); Modal.hide();">🎉 Mark Delivered</button>
+              <button class="os-btn" id="sk-share-loc-btn" onclick="App.toggleShopkeeperLocationSharing(${o.id}, this)" style="background:#ecfdf5; border-color:#6ee7b7; color:#065f46; font-weight:750;" title="Share your live GPS location with the customer">
+                📍 Share My Location
+              </button>
+            ` : ''}
             ${o.order_status === 'Rejected' ? `<button class="os-btn active" onclick="App.reacceptOrder(${o.id},'${escapeHtml(o.order_number)}'); Modal.hide();">🔄 Re-Accept</button>` : ''}
             <button class="os-btn" onclick="Modal.hide()" style="border-color:#cbd5e1; color:var(--slate-600);">✕ Close</button>
           </div>
@@ -2908,12 +3169,143 @@ const App = (() => {
   async function setOrderStatus(orderId, status, reason = '') {
     const res = await api('update_order_status', { order_id: orderId, status, reason }, 'POST');
     if (res.success) {
-      toast(`✅ Order ${status}!`);
+      toast(`\u2705 Order ${status}!`);
+      // Auto-stop GPS sharing when order is no longer OutForDelivery
+      if (['Delivered', 'Rejected', 'Cancelled'].includes(status)) {
+        _stopShopkeeperGPS();
+        api('stop_delivery_tracking', { order_id: orderId }, 'POST').catch(() => {});
+      }
       await loadShopStats();
       await loadShopOrders();
     } else {
       toast(res.error || `Failed to update order status`, 'error');
       await loadShopOrders();
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // SHOPKEEPER GPS SHARING  (runs on shopkeeper's phone / browser)
+  // ─────────────────────────────────────────────────────────────────
+  let _skWatchId = null;          // browser watchPosition ID
+  let _skCurrentOrderId = null;   // order currently being tracked
+  let _skSharing = false;         // are we actively sharing?
+
+  function _stopShopkeeperGPS() {
+    if (_skWatchId !== null && navigator.geolocation) {
+      navigator.geolocation.clearWatch(_skWatchId);
+      _skWatchId = null;
+    }
+    _skSharing = false;
+    _skCurrentOrderId = null;
+    // Update button state if it is still in DOM
+    const btn = document.getElementById('sk-share-loc-btn');
+    if (btn) {
+      btn.textContent = '\uD83D\uDCCD Share My Location';
+      btn.style.background = '#ecfdf5';
+      btn.style.color = '#065f46';
+      btn.style.borderColor = '#6ee7b7';
+    }
+  }
+
+  async function toggleShopkeeperLocationSharing(orderId, btn) {
+    // If already sharing THIS order — stop
+    if (_skSharing && _skCurrentOrderId === orderId) {
+      _stopShopkeeperGPS();
+      await api('stop_delivery_tracking', { order_id: orderId }, 'POST').catch(() => {});
+      toast('\uD83D\uDCCD Location sharing stopped.');
+      return;
+    }
+
+    // If sharing a DIFFERENT order — stop the old one first
+    if (_skSharing) {
+      _stopShopkeeperGPS();
+    }
+
+    if (!navigator.geolocation) {
+      toast('\u26A0\uFE0F Location is not supported by this browser.', 'error');
+      return;
+    }
+
+    // Update button to indicate pending permission
+    if (btn) {
+      btn.textContent = '\u23F3 Requesting permission...';
+      btn.disabled = true;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        // Permission granted — switch to watchPosition
+        _skSharing = true;
+        _skCurrentOrderId = orderId;
+        if (btn) {
+          btn.textContent = '\uD83D\uDFE2 Sharing Live... (tap to stop)';
+          btn.style.background = '#dcfce7';
+          btn.style.color = '#15803d';
+          btn.style.borderColor = '#86efac';
+          btn.disabled = false;
+        }
+        toast('\uD83D\uDCCD Live location sharing started!');
+
+        // Send the first fix immediately
+        const { latitude, longitude, accuracy } = pos.coords;
+        _sendGPSUpdate(orderId, latitude, longitude, accuracy, pos.coords.heading, pos.coords.speed);
+
+        // Watch for ongoing updates
+        _skWatchId = navigator.geolocation.watchPosition(
+          (p) => {
+            if (!_skSharing) { navigator.geolocation.clearWatch(_skWatchId); return; }
+            _sendGPSUpdate(
+              orderId,
+              p.coords.latitude,
+              p.coords.longitude,
+              p.coords.accuracy,
+              p.coords.heading,
+              p.coords.speed
+            );
+          },
+          (err) => {
+            console.warn('[GH GPS watch error]', err.code, err.message);
+            if (err.code === err.PERMISSION_DENIED) {
+              toast('Location permission denied. Sharing stopped.', 'error');
+              _stopShopkeeperGPS();
+            }
+            // For POSITION_UNAVAILABLE / TIMEOUT — keep watching, just log
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 5000,     // accept a 5-second-old cached fix
+            timeout: 15000
+          }
+        );
+      },
+      (err) => {
+        if (btn) { btn.textContent = '\uD83D\uDCCD Share My Location'; btn.disabled = false; }
+        if (err.code === err.PERMISSION_DENIED) {
+          toast('\u26A0\uFE0F Location access was denied. Please allow location in browser settings.', 'error');
+        } else {
+          toast('\u26A0\uFE0F Could not get your location. Please try again.', 'error');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }
+
+  async function _sendGPSUpdate(orderId, lat, lng, accuracy, heading, speed) {
+    try {
+      await fetch(`api.php?action=update_delivery_location`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          order_id: orderId,
+          latitude: lat,
+          longitude: lng,
+          accuracy: accuracy || null,
+          heading: heading || null,
+          speed: speed || null
+        })
+      });
+    } catch (e) {
+      console.warn('[GH GPS send error]', e);
     }
   }
 
@@ -4534,6 +4926,8 @@ const App = (() => {
     setOrderStatus,
     verifyPay,
     openShopOrderDetailsModal,
+    toggleShopkeeperLocationSharing,
+    stopLiveTracking,
     getState: () => state,
   };
 })();
