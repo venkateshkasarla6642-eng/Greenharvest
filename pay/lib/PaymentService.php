@@ -173,7 +173,7 @@ class PaymentService {
         }
         $keyId = $this->live->getKeyId();
         if (empty($provider) || $provider === 'none') {
-            if (!empty($keyId) && str_starts_with($keyId, 'rzp_')) {
+            if ($isLive || (!empty($keyId) && str_starts_with($keyId, 'rzp_'))) {
                 $provider = 'razorpay';
             }
         }

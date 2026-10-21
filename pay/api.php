@@ -745,6 +745,35 @@ switch ($action) {
         break;
 
     /**
+     * Switch payment mode atomically (sandbox <-> live).
+     * POST: mode
+     */
+    case 'owner_switch_mode':
+        $owner = payRequireOwner();
+        payVerifyCsrf();
+        $targetMode = trim($_POST['mode'] ?? 'sandbox');
+        if (!in_array($targetMode, ['sandbox', 'live'])) {
+            jsonResponse(['error' => 'Invalid mode.'], 400);
+        }
+
+        $setProvider = '';
+        if ($targetMode === 'live') {
+            $currProv = $db->query("SELECT live_provider FROM gh_pay_settings WHERE id = 1")->fetchColumn();
+            if (empty($currProv) || $currProv === 'none') {
+                $setProvider = ", live_provider = 'razorpay'";
+            }
+        }
+
+        $db->prepare("UPDATE gh_pay_settings SET mode = ? $setProvider, updated_at = NOW(), updated_by_user_id = ? WHERE id = 1")
+           ->execute([$targetMode, $owner['id']]);
+
+        $auditLogger = new AuditLogger($db);
+        $auditLogger->log('mode_switched', ['mode' => $targetMode], $owner['id'], 'settings', 1);
+
+        jsonResponse(['success' => true, 'mode' => $targetMode]);
+        break;
+
+    /**
      * Test Razorpay API connection (owner only).
      * POST: key_id (optional), key_secret (optional)
      */

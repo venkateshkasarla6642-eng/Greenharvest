@@ -4,6 +4,7 @@
 // Any other role gets a hard redirect. No information leakage.
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/lib/PaymentService.php';
 
 $user = getCurrentUser();
 
@@ -16,6 +17,15 @@ if (!$user || ($user['role'] !== 'owner' && $user['role'] !== 'shopkeeper')) {
     http_response_code(302);
     header("Location: $baseApp");
     exit;
+}
+
+$db = getDB();
+$payService = new PaymentService($db);
+$currentSettings = $payService->getSettings();
+$currentMode = $currentSettings['mode'] ?? 'sandbox';
+$currentProvider = $currentSettings['live_provider'] ?? 'none';
+if ($currentMode === 'live' && ($currentProvider === 'none' || empty($currentProvider))) {
+    $currentProvider = 'razorpay';
 }
 
 $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
@@ -89,7 +99,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
 <div class="pay-topbar" id="payTopbar">
   <button class="pay-topbar-menu" onclick="PayAdmin.toggleSidebar()" aria-label="Toggle menu">☰</button>
   <div class="pay-topbar-title">💳 GreenHarvest Pay</div>
-  <div class="pay-mode-badge" id="topbarModeBadge">SANDBOX</div>
+  <div class="pay-mode-badge <?= $currentMode === 'live' ? 'live-mode' : '' ?>" id="topbarModeBadge"><?= strtoupper($currentMode) ?></div>
 </div>
 <div class="pay-sidebar-overlay" id="paySidebarOverlay" onclick="PayAdmin.closeSidebar()"></div>
 
@@ -100,9 +110,9 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   <section id="sec-overview" class="pay-section active">
     <div class="pay-section-header">
       <h1 class="pay-section-title">Payment Overview</h1>
-      <div class="pay-mode-pill" id="modePill">
+      <div class="pay-mode-pill <?= $currentMode === 'live' ? 'live-mode' : '' ?>" id="modePill">
         <span class="pay-mode-dot"></span>
-        <span id="modePillText">Sandbox Mode</span>
+        <span id="modePillText"><?= $currentMode === 'live' ? '🔴 Live Mode' : '🧪 Sandbox Mode' ?></span>
       </div>
     </div>
 
@@ -436,14 +446,14 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
           <label class="pay-label">Payment Mode</label>
           <div class="pay-mode-toggle">
             <label class="pay-mode-opt">
-              <input type="radio" name="mode" value="sandbox" id="modeSandbox" checked>
+              <input type="radio" name="mode" value="sandbox" id="modeSandbox" <?= $currentMode === 'sandbox' ? 'checked' : '' ?> onchange="PayAdmin.onModeChange('sandbox')">
               <span class="pay-mode-card pay-mode-sandbox">
                 🧪 Sandbox (Testing)<br>
                 <small>No real money. Safe for development.</small>
               </span>
             </label>
             <label class="pay-mode-opt">
-              <input type="radio" name="mode" value="live" id="modeLive">
+              <input type="radio" name="mode" value="live" id="modeLive" <?= $currentMode === 'live' ? 'checked' : '' ?> onchange="PayAdmin.onModeChange('live')">
               <span class="pay-mode-card pay-mode-live">
                 🔴 Live (Production)<br>
                 <small>Real payments. Requires valid merchant credentials.</small>
@@ -466,14 +476,14 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
         <div class="pay-form-group">
           <label class="pay-label">Live Payment Provider</label>
           <select name="live_provider" id="liveProvider" class="pay-select" onchange="PayAdmin.toggleProviderFields()">
-            <option value="none">None (Sandbox / QR only)</option>
-            <option value="razorpay">Razorpay</option>
-            <option value="cashfree">Cashfree</option>
-            <option value="phonepe">PhonePe (Coming soon)</option>
+            <option value="none" <?= $currentProvider === 'none' ? 'selected' : '' ?>>None (Sandbox / QR only)</option>
+            <option value="razorpay" <?= $currentProvider === 'razorpay' ? 'selected' : '' ?>>Razorpay</option>
+            <option value="cashfree" <?= $currentProvider === 'cashfree' ? 'selected' : '' ?>>Cashfree</option>
+            <option value="phonepe" <?= $currentProvider === 'phonepe' ? 'selected' : '' ?>>PhonePe (Coming soon)</option>
           </select>
         </div>
 
-        <div id="liveProviderFields" style="display:none;">
+        <div id="liveProviderFields" style="<?= ($currentProvider && $currentProvider !== 'none') ? 'display:block;' : 'display:none;' ?>">
           <!-- Credentials Status Indicator -->
           <div id="credentialsStatusBanner" style="display:none;margin-bottom:14px;border-radius:10px;padding:12px 14px;font-size:13px;"></div>
 
