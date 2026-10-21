@@ -92,6 +92,20 @@ $payService = new PaymentService($db);
 switch ($action) {
 
     // ════════════════════════════════════════════════════════════════════════
+    // PUBLIC / CUSTOMER GATEWAY DISCOVERY
+    // ════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Public gateway status and available channels.
+     * Safe to call on checkout page; never exposes private keys.
+     */
+    case 'get_public_settings':
+        $pub = $payService->getPublicSettings();
+        $pub['csrf_token'] = $_SESSION['pay_csrf_token'] ?? '';
+        jsonResponse($pub);
+        break;
+
+    // ════════════════════════════════════════════════════════════════════════
     // CUSTOMER ACTIONS
     // ════════════════════════════════════════════════════════════════════════
 
@@ -101,8 +115,8 @@ switch ($action) {
      * Returns: payment_ref, attempt_id, amount, provider data
      */
     case 'initiate_payment':
-        $u = payRequireCustomer();
-        payRateLimit('initiate_' . $u['id'], 5);
+        $u = payRequireAuth();
+        payRateLimit('initiate_' . $u['id'], 15);
 
         $orderId        = intval($_POST['order_id'] ?? 0);
         $method         = trim($_POST['method'] ?? 'qr_upi');
@@ -168,11 +182,40 @@ switch ($action) {
         break;
 
     /**
+     * Customer live payment callback verification.
+     * POST: payment_ref, razorpay_payment_id, razorpay_order_id, razorpay_signature
+     */
+    case 'initiate_payment_live_callback':
+        $u = payRequireAuth();
+        $paymentRef        = preg_replace('/[^A-Za-z0-9\-]/', '', $_POST['payment_ref'] ?? '');
+        $razorpayPaymentId = trim($_POST['razorpay_payment_id'] ?? '');
+        $razorpaySignature = trim($_POST['razorpay_signature'] ?? '');
+
+        if (empty($paymentRef)) {
+            jsonResponse(['error' => 'Missing payment reference.'], 400);
+        }
+
+        $stmt = $db->prepare("SELECT * FROM gh_payment_attempts WHERE payment_ref = ?");
+        $stmt->execute([$paymentRef]);
+        $attempt = $stmt->fetch();
+
+        if (!$attempt) {
+            jsonResponse(['error' => 'Payment attempt not found.'], 404);
+        }
+        if ((int)$attempt['customer_id'] !== (int)$u['id'] && $u['role'] !== 'owner') {
+            jsonResponse(['error' => 'Unauthorized.'], 403);
+        }
+
+        $result = $payService->verifyPayment((int)$attempt['id'], (int)$u['id'], 'paid', $razorpayPaymentId, $razorpaySignature);
+        jsonResponse($result);
+        break;
+
+    /**
      * Submit QR/UPI payment details (UTR + screenshot) for manual verification.
      * POST: payment_ref, utr_reference, screenshot (file)
      */
     case 'submit_qr_payment':
-        $u = payRequireCustomer();
+        $u = payRequireAuth();
         payRateLimit('qr_submit_' . $u['id'], 3);
 
         $paymentRef  = preg_replace('/[^A-Za-z0-9\-]/', '', $_POST['payment_ref'] ?? '');

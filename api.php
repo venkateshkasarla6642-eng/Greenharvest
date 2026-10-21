@@ -22,8 +22,8 @@ function checkShopkeeperRole() {
     if (!$user) {
         jsonResponse(['error' => 'Authentication required. Please sign in as Shopkeeper.'], 401);
     }
-    if ($user['role'] !== 'shopkeeper') {
-        jsonResponse(['error' => 'Access Denied: Only Shopkeepers can perform this action.'], 403);
+    if ($user['role'] !== 'shopkeeper' && $user['role'] !== 'owner') {
+        jsonResponse(['error' => 'Access Denied: Only Store Administrators can perform this action.'], 403);
     }
     return $user;
 }
@@ -76,7 +76,11 @@ switch ($action) {
 
         if ($u && password_verify($password, $u['password'])) {
             if ($portalRole && $u['role'] !== $portalRole) {
-                jsonResponse(['error' => "This account is registered as a " . ucfirst($u['role']) . ". Please sign in under the " . ucfirst($u['role']) . " tab."], 403);
+                if ($u['role'] === 'owner' && $portalRole === 'shopkeeper') {
+                    // Owner is authorized to sign in through management portal
+                } else {
+                    jsonResponse(['error' => "This account is registered as a " . ucfirst($u['role']) . ". Please sign in under the " . ucfirst($u['role']) . " tab."], 403);
+                }
             }
             $_SESSION['user_id'] = $u['id'];
             $_SESSION['role'] = $u['role'];
@@ -725,7 +729,7 @@ switch ($action) {
 
         $totalAmount = max(0, ($subtotal + $deliveryFee - $discountAmount));
         $orderNumber = '#' . rand(1000, 9999);
-        $paymentStatus = ($payment_method === 'COD') ? 'Pending' : ($upi_trans_id ? 'Paid' : 'Pending');
+        $paymentStatus = in_array($payment_method, ['COD', 'GreenHarvestPay']) ? 'Pending' : ($upi_trans_id ? 'Paid' : 'Pending');
 
         // Insert Order
         $stmt = $db->prepare("INSERT INTO orders (order_number, customer_id, customer_name, customer_phone, subtotal, delivery_fee, discount_amount, total_amount, delivery_address, payment_method, payment_status, upi_trans_id, order_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Placed')");

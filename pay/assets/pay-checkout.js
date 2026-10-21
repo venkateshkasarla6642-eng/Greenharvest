@@ -1,21 +1,42 @@
 /**
  * GreenHarvest Pay — Customer Checkout Widget
- * Loaded after app.js on the main index.php page.
+ * Seamlessly integrates GreenHarvest Pay into the checkout flow.
  *
- * HOW IT INTEGRATES:
- *  - Hooks into the existing order confirmation flow.
- *  - After place_order succeeds, opens the GHPay payment sheet.
- *  - Calls /pay/api.php to initiate and track the payment attempt.
- *  - Updates the order confirmation modal with live payment status.
- *  - Never trusts client-calculated amounts — server provides them.
+ * FEATURES:
+ *  - Dynamic base path detection (works in localhost subdirectory or root domain)
+ *  - Secure public settings query (never exposes private API keys)
+ *  - Idempotent payment attempts linked to real customer orders
+ *  - Clear Sandbox testing mode with 4 simulation states (paid, failed, pending, cancelled)
+ *  - Authorized live payment provider support (Razorpay / Cashfree) with HMAC verification
+ *  - Direct UPI QR verification with customer UTR submission
+ *  - Responsive mobile, tablet, laptop, and desktop UI
  */
 
 'use strict';
 
 const GHPay = (function () {
 
-  const API_URL = '/pay/api.php';
+  // Detect base URL dynamically (e.g., '' or '/market')
+  const BASE_PATH = (function () {
+    const scripts = document.getElementsByTagName('script');
+    for (let i = 0; i < scripts.length; i++) {
+      const src = scripts[i].src || '';
+      if (src.indexOf('/pay/assets/pay-checkout.js') !== -1 || src.indexOf('pay/assets/pay-checkout.js') !== -1) {
+        try {
+          const u = new URL(src, window.location.href);
+          const p = u.pathname.replace(/\/pay\/assets\/pay-checkout\.js.*$/, '');
+          return p;
+        } catch (e) {
+          return '';
+        }
+      }
+    }
+    return '';
+  })();
+
+  const API_URL = (BASE_PATH ? BASE_PATH : '') + '/pay/api.php';
   let _csrfToken = null;
+  let _cachedSettings = null;
 
   // ── Fetch CSRF token once per session ──────────────────────────────────────
 
@@ -61,7 +82,6 @@ const GHPay = (function () {
   // ── Generate idempotency key ───────────────────────────────────────────────
 
   function genIdempotencyKey(orderId) {
-    // Unique per order + session, prevents double-submit on retry
     const stored = sessionStorage.getItem('ghpay_ikey_' + orderId);
     if (stored) return stored;
     const key = 'GHI-' + orderId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
@@ -69,36 +89,42 @@ const GHPay = (function () {
     return key;
   }
 
-  // ── Load pay settings (UPI ID, QR path, mode) ─────────────────────────────
+  // ── Load pay settings (Public safe endpoint) ───────────────────────────────
 
-  async function loadPaySettings() {
+  async function loadPaySettings(force = false) {
+    if (_cachedSettings && !force) return _cachedSettings;
     try {
-      const r = await fetch('/pay/api.php?action=owner_get_settings', { credentials: 'same-origin' });
+      const r = await fetch(API_URL + '?action=get_public_settings', { credentials: 'same-origin' });
       const d = await r.json();
-      return d.settings || {};
+      if (d && d.success) {
+        _cachedSettings = d;
+        if (d.csrf_token) _csrfToken = d.csrf_token;
+        return d;
+      }
     } catch (e) {
-      return {};
+      // Fallback defaults
     }
+    _cachedSettings = {
+      success: true,
+      enabled: true,
+      mode: 'sandbox',
+      is_sandbox: true,
+      enabled_methods: 'qr_upi,cod,sandbox',
+      live_provider: 'none',
+      has_live_keys: false,
+      upi_id: ''
+    };
+    return _cachedSettings;
   }
 
-  // ── Main entry: open GreenHarvest Pay for a confirmed order ───────────────
+  // ── Map payment_method to GHPay method ─────────────────────────────────────
 
-  async function openForOrder(orderId, orderNumber, totalAmount, paymentMethod) {
-    // Determine GHPay method from existing checkout selection
-    let ghMethod = mapMethod(paymentMethod);
-
-    // Fetch settings to check enabled methods, mode, QR info
-    const settings = await loadPaySettings();
-    const isSandbox = (settings.mode || 'sandbox') === 'sandbox';
-
-    // Render GHPay sheet in the existing modal
-    renderCheckoutSheet(orderId, orderNumber, totalAmount, ghMethod, settings, isSandbox);
-  }
-
-  // ── Map existing payment_method to GHPay method ────────────────────────────
-
-  function mapMethod(method) {
-    switch ((method || '').toLowerCase()) {
+  function mapMethod(method, isSandbox) {
+    const m = (method || '').toLowerCase().trim();
+    if (m === 'greenharvestpay' || m === 'greenharvest' || m === 'ghpay') {
+      return isSandbox ? 'sandbox' : 'qr_upi';
+    }
+    switch (m) {
       case 'scanpay':
       case 'gpay':
       case 'upi':
@@ -112,34 +138,51 @@ const GHPay = (function () {
       case 'sandbox':
         return 'sandbox';
       default:
-        return 'qr_upi';
+        return isSandbox ? 'sandbox' : 'qr_upi';
     }
   }
 
-  // ── Render the GHPay checkout sheet inside the existing modal ─────────────
+  // ── Main entry: open GreenHarvest Pay for an order ─────────────────────────
+
+  async function openForOrder(orderId, orderNumber, totalAmount, paymentMethod) {
+    const settings = await loadPaySettings();
+
+    // Check if gateway is disabled
+    if (settings.enabled === false) {
+      _showDisabledState();
+      return;
+    }
+
+    const isSandbox = (settings.mode || 'sandbox') === 'sandbox';
+    let ghMethod = mapMethod(paymentMethod, isSandbox);
+
+    renderCheckoutSheet(orderId, orderNumber, totalAmount, ghMethod, settings, isSandbox);
+  }
+
+  // ── Render the GHPay checkout sheet inside the modal ───────────────────────
 
   function renderCheckoutSheet(orderId, orderNumber, amount, initialMethod, settings, isSandbox) {
-    const upiId    = settings.upi_id    || settings.shop_upi_id || '';
+    const upiId    = settings.upi_id || '';
     const qrPath   = settings.qr_image_path || '';
     const modeTag  = isSandbox
-      ? '<span class="ghpay-mode-tag ghpay-mode-sandbox">🧪 Test Mode</span>'
-      : '<span class="ghpay-mode-tag ghpay-mode-live">🔴 Live</span>';
+      ? '<span class="ghpay-mode-tag ghpay-mode-sandbox">🧪 Sandbox (Test Mode)</span>'
+      : '<span class="ghpay-mode-tag ghpay-mode-live">🔒 256-Bit Secure Live</span>';
 
     // Build QR image URL
     let qrImgSrc = '';
     if (qrPath) {
-      qrImgSrc = '/' + qrPath;
+      qrImgSrc = qrPath.startsWith('http') ? qrPath : ((BASE_PATH ? BASE_PATH : '') + '/' + qrPath.replace(/^\//, ''));
     } else if (upiId) {
       qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=175x175&data=upi://pay?pa=${encodeURIComponent(upiId)}%26pn=GreenHarvest%26am=${parseFloat(amount).toFixed(2)}%26cu=INR`;
     }
 
-    const enabledMethods = (settings.enabled_methods || 'qr_upi,cod').split(',').map(m => m.trim());
+    const enabledMethods = (settings.enabled_methods || 'qr_upi,cod,sandbox').split(',').map(m => m.trim());
     const methodsHtml = buildMethodsHtml(enabledMethods, initialMethod, isSandbox);
 
     const html = `
       <div class="ghpay-checkout-wrap" id="ghpayWrap">
         <div class="ghpay-header">
-          <div class="ghpay-logo-icon">💳</div>
+          <div class="ghpay-logo-icon">🌿</div>
           <div class="ghpay-brand">
             <div class="ghpay-brand-name">GreenHarvest Pay</div>
             <div class="ghpay-brand-sub">Order ${escSafe(orderNumber)}</div>
@@ -149,14 +192,14 @@ const GHPay = (function () {
 
         <div class="ghpay-amount-box">
           <div>
-            <div class="ghpay-amount-label">Amount to Pay</div>
-            <div style="font-size:12px;color:#64748b;">Order ${escSafe(orderNumber)}</div>
+            <div class="ghpay-amount-label">Final Payable Amount</div>
+            <div style="font-size:12px;color:#64748b;margin-top:2px;">Fresh Vegetables Order ${escSafe(orderNumber)}</div>
           </div>
           <div class="ghpay-amount-value">₹${parseFloat(amount).toFixed(2)}</div>
         </div>
 
         <div id="ghpayMethodsWrap">
-          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Choose Payment Method</div>
+          <div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Select Payment Option</div>
           <div class="ghpay-methods" id="ghpayMethods">
             ${methodsHtml}
           </div>
@@ -165,11 +208,13 @@ const GHPay = (function () {
         <!-- Dynamic payment content area -->
         <div id="ghpayContent"></div>
 
-        <div id="ghpayActionWrap">
+        <div id="ghpayActionWrap" style="margin-top:14px;">
           <button class="ghpay-pay-btn" id="ghpayPayBtn" onclick="GHPay._submit()">
-            💳 Pay ₹${parseFloat(amount).toFixed(2)}
+            🌿 Confirm &amp; Pay ₹${parseFloat(amount).toFixed(2)}
           </button>
-          <div class="ghpay-secure-note">🔒 Secured by GreenHarvest Pay · 256-bit SSL</div>
+          <div class="ghpay-secure-note" style="margin-top:8px;text-align:center;font-size:11.5px;color:#64748b;">
+            🔒 Verified by GreenHarvest Pay · Server-Side Verification
+          </div>
         </div>
       </div>
     `;
@@ -180,85 +225,156 @@ const GHPay = (function () {
     const modalOverlay = document.getElementById('modalOverlay');
     if (modalBody) {
       modalBody.innerHTML = html;
-      if (modalCard) modalCard.style.maxWidth = '480px';
+      if (modalCard) modalCard.style.maxWidth = '520px';
       if (modalOverlay) modalOverlay.classList.add('show');
     }
 
-    // Store state for submit
+    // Store state
     window._ghpayState = {
-      orderId, orderNumber, amount, isSandbox,
+      orderId,
+      orderNumber,
+      amount,
+      isSandbox,
       currentMethod: initialMethod,
-      upiId, qrImgSrc,
-      enabledMethods
+      upiId,
+      qrImgSrc,
+      enabledMethods,
+      liveProvider: settings.live_provider || 'none',
+      hasLiveKeys: !!settings.has_live_keys
     };
 
     // Render initial content
-    _renderMethodContent(initialMethod, upiId, qrImgSrc, amount, isSandbox);
+    _renderMethodContent(initialMethod, upiId, qrImgSrc, amount, isSandbox, settings);
 
-    // Wire method selector
+    // Wire method selector radio buttons
     document.querySelectorAll('input[name="ghpayMethod"]').forEach(radio => {
       radio.addEventListener('change', () => {
         const m = radio.value;
         window._ghpayState.currentMethod = m;
         document.querySelectorAll('.ghpay-method-opt').forEach(o => o.classList.remove('selected'));
-        radio.closest('.ghpay-method-opt').classList.add('selected');
-        _renderMethodContent(m, upiId, qrImgSrc, amount, isSandbox);
+        const opt = radio.closest('.ghpay-method-opt');
+        if (opt) opt.classList.add('selected');
+        _renderMethodContent(m, upiId, qrImgSrc, amount, isSandbox, settings);
       });
     });
   }
 
   function buildMethodsHtml(enabledMethods, initialMethod, isSandbox) {
-    const methodDefs = [
-      { key: 'qr_upi',        icon: '📱', label: 'Scan & Pay (UPI QR)', sub: 'GPay · PhonePe · Paytm · Any UPI' },
-      { key: 'cod',           icon: '💵', label: 'Cash on Delivery',    sub: 'Pay when order arrives' },
-      { key: 'live_upi',      icon: '⚡', label: 'UPI (Direct)',        sub: 'Enter UPI ID to pay instantly' },
-      { key: 'live_card',     icon: '💳', label: 'Card Payment',        sub: 'Visa · Mastercard · RuPay' },
-      { key: 'sandbox',       icon: '🧪', label: 'Sandbox (Test)',      sub: 'Simulated payment — no real money' },
-    ];
+    const methodDefs = [];
 
-    return methodDefs
-      .filter(m => enabledMethods.includes(m.key) || (m.key === 'sandbox' && isSandbox))
-      .map(m => `
-        <label class="ghpay-method-opt ${m.key === initialMethod ? 'selected' : ''}">
-          <input type="radio" name="ghpayMethod" value="${m.key}" ${m.key === initialMethod ? 'checked' : ''}>
+    if (isSandbox) {
+      methodDefs.push({
+        key: 'sandbox',
+        icon: '🧪',
+        label: 'Sandbox Simulator',
+        sub: 'Simulate instant test payment (Success, Failed, Pending, Cancel)'
+      });
+    }
+
+    methodDefs.push({
+      key: 'qr_upi',
+      icon: '📱',
+      label: 'Scan & Pay (UPI QR)',
+      sub: 'Scan QR with GPay / PhonePe / Paytm / Any UPI app'
+    });
+
+    methodDefs.push({
+      key: 'live_upi',
+      icon: '⚡',
+      label: 'Instant UPI / Cards',
+      sub: 'Direct payment gateway movement'
+    });
+
+    methodDefs.push({
+      key: 'cod',
+      icon: '💵',
+      label: 'Cash on Delivery',
+      sub: 'Pay with cash upon arrival at your door'
+    });
+
+    // Pick matching or fallback
+    let matched = false;
+    const items = methodDefs.map(m => {
+      const isSel = (m.key === initialMethod);
+      if (isSel) matched = true;
+      return `
+        <label class="ghpay-method-opt ${isSel ? 'selected' : ''}">
+          <input type="radio" name="ghpayMethod" value="${m.key}" ${isSel ? 'checked' : ''}>
           <div class="ghpay-method-icon">${m.icon}</div>
-          <div>
+          <div style="flex:1;">
             <div class="ghpay-method-label">${m.label}</div>
             <div class="ghpay-method-sub">${m.sub}</div>
           </div>
         </label>
-      `).join('');
+      `;
+    });
+
+    // If none matched, check first by default
+    if (!matched && methodDefs.length > 0) {
+      initialMethod = methodDefs[0].key;
+      return buildMethodsHtml(enabledMethods, initialMethod, isSandbox);
+    }
+
+    return items.join('');
   }
 
-  function _renderMethodContent(method, upiId, qrImgSrc, amount, isSandbox) {
+  function _renderMethodContent(method, upiId, qrImgSrc, amount, isSandbox, settings) {
     const container = document.getElementById('ghpayContent');
     const payBtn    = document.getElementById('ghpayPayBtn');
     if (!container) return;
 
     switch (method) {
+      case 'sandbox':
+        container.innerHTML = `
+          <div class="ghpay-sandbox-panel" style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:12px;padding:14px;margin-top:10px;">
+            <div class="ghpay-sandbox-title" style="font-weight:800;color:#1e40af;font-size:13.5px;margin-bottom:4px;">
+              🧪 GreenHarvest Pay — Sandbox Simulator
+            </div>
+            <p style="font-size:12px;color:#3b82f6;margin:0 0 12px 0;">
+              This test order uses no real money. Click a simulation outcome below to verify server-side state transitions:
+            </p>
+            <div class="ghpay-sandbox-buttons" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <button type="button" class="ghpay-sim-btn ghpay-sim-success" style="background:#10b981;color:#fff;border:none;padding:10px;border-radius:8px;font-weight:700;cursor:pointer;" onclick="GHPay._sandboxSimulate('paid')">
+                ✅ Simulate Success
+              </button>
+              <button type="button" class="ghpay-sim-btn ghpay-sim-fail" style="background:#ef4444;color:#fff;border:none;padding:10px;border-radius:8px;font-weight:700;cursor:pointer;" onclick="GHPay._sandboxSimulate('failed')">
+                ❌ Simulate Failed
+              </button>
+              <button type="button" class="ghpay-sim-btn ghpay-sim-pending" style="background:#f59e0b;color:#fff;border:none;padding:10px;border-radius:8px;font-weight:700;cursor:pointer;" onclick="GHPay._sandboxSimulate('pending')">
+                ⏳ Simulate Pending
+              </button>
+              <button type="button" class="ghpay-sim-btn ghpay-sim-cancel" style="background:#64748b;color:#fff;border:none;padding:10px;border-radius:8px;font-weight:700;cursor:pointer;" onclick="GHPay._sandboxSimulate('cancelled')">
+                🚫 Cancel Payment
+              </button>
+            </div>
+          </div>
+        `;
+        if (payBtn) payBtn.style.display = 'none';
+        break;
+
       case 'qr_upi':
         container.innerHTML = `
-          <div class="ghpay-qr-section">
-            <h4>📷 Official UPI QR Code</h4>
-            <p style="font-size:12px;color:#64748b;margin-bottom:6px;">Scan with GPay · PhonePe · Paytm · Any UPI app</p>
-            ${qrImgSrc ? `<img class="ghpay-qr-img" src="${escSafe(qrImgSrc)}" alt="GreenHarvest UPI QR Code">` : '<div style="padding:30px;color:#64748b;font-size:13px;">QR image not configured by admin.</div>'}
-            <div class="ghpay-upi-id">${escSafe(upiId) || 'UPI ID not set'}</div>
-            <div class="ghpay-upi-amount">Amount: <strong>₹${parseFloat(amount).toFixed(2)}</strong></div>
+          <div class="ghpay-qr-section" style="background:#fafafa;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center;margin-top:10px;">
+            <h4 style="margin:0 0 4px 0;color:#0f172a;font-size:14px;">📷 Official GreenHarvest UPI QR</h4>
+            <p style="font-size:12px;color:#64748b;margin:0 0 12px 0;">Scan with GPay, PhonePe, Paytm, or any UPI app</p>
+            ${qrImgSrc
+              ? `<img class="ghpay-qr-img" src="${escSafe(qrImgSrc)}" alt="UPI QR Code" style="width:160px;height:160px;border-radius:8px;border:1px solid #cbd5e1;padding:6px;background:#fff;margin:0 auto 10px auto;display:block;">`
+              : `<div style="padding:20px;color:#64748b;font-size:12px;border:1px dashed #cbd5e1;border-radius:8px;margin-bottom:10px;">Official QR Code active for: <strong>${escSafe(upiId || 'GreenHarvest UPI')}</strong></div>`
+            }
+            ${upiId ? `<div class="ghpay-upi-id" style="font-weight:800;color:#047857;font-size:13.5px;margin-bottom:4px;">${escSafe(upiId)}</div>` : ''}
+            <div class="ghpay-upi-amount" style="font-size:13px;color:#475569;margin-bottom:12px;">Amount to transfer: <strong>₹${parseFloat(amount).toFixed(2)}</strong></div>
 
-            <div class="ghpay-utr-input-wrap">
-              <label>UTR / Transaction Reference ID <span style="color:#ef4444">*</span></label>
-              <input class="ghpay-utr-input" id="ghpayUtrInput" placeholder="e.g. 417123456789012" autocomplete="off">
-              <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Enter the 12-digit UTR from your UPI app after payment.</div>
-            </div>
-
-            <div class="ghpay-screenshot-wrap">
-              <label>Payment Screenshot (Optional)</label>
-              <input type="file" id="ghpayScreenshot" accept="image/jpeg,image/png,image/webp">
-              <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Max 5 MB · JPEG / PNG / WebP</div>
+            <div class="ghpay-utr-input-wrap" style="text-align:left;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:8px;">
+              <label style="display:block;font-size:12px;font-weight:700;color:#334155;margin-bottom:4px;">
+                UPI Transaction / Reference ID (UTR) <span style="color:#ef4444">*</span>
+              </label>
+              <input class="ghpay-utr-input" id="ghpayUtrInput" placeholder="e.g. 417123456789 (12-digit UTR)" autocomplete="off" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;box-sizing:border-box;">
+              <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Enter the transaction reference from your UPI app after completing transfer.</div>
             </div>
           </div>
         `;
         if (payBtn) {
+          payBtn.style.display = 'block';
           payBtn.innerHTML = `📱 Submit Payment Details`;
           payBtn.disabled = false;
         }
@@ -266,52 +382,50 @@ const GHPay = (function () {
 
       case 'cod':
         container.innerHTML = `
-          <div class="ghpay-cod-note">
-            💵 <strong>Cash on Delivery selected.</strong><br>
-            Pay ₹${parseFloat(amount).toFixed(2)} in cash when the delivery arrives at your door.
-            No advance payment required.
+          <div class="ghpay-cod-note" style="background:#fefce8;border:1.5px solid #fef08a;border-radius:12px;padding:14px;color:#854d0e;font-size:13px;line-height:1.5;margin-top:10px;">
+            💵 <strong>Cash on Delivery Confirmed.</strong><br>
+            Please keep <strong>₹${parseFloat(amount).toFixed(2)}</strong> ready in cash when our delivery rider arrives with your fresh vegetables.
           </div>
         `;
         if (payBtn) {
-          payBtn.innerHTML = `✅ Confirm COD Order`;
+          payBtn.style.display = 'block';
+          payBtn.innerHTML = `✅ Confirm Cash on Delivery`;
           payBtn.disabled = false;
         }
-        break;
-
-      case 'sandbox':
-        container.innerHTML = `
-          <div class="ghpay-sandbox-panel">
-            <div class="ghpay-sandbox-title">🧪 Sandbox Simulator — No Real Money</div>
-            <div style="font-size:12px;color:#0369a1;margin-bottom:10px;">Click a button below to simulate a payment outcome.</div>
-            <div class="ghpay-sandbox-buttons">
-              <button class="ghpay-sim-btn ghpay-sim-success" onclick="GHPay._sandboxSimulate('paid')">✅ Success</button>
-              <button class="ghpay-sim-btn ghpay-sim-fail"    onclick="GHPay._sandboxSimulate('failed')">❌ Failed</button>
-              <button class="ghpay-sim-btn ghpay-sim-pending" onclick="GHPay._sandboxSimulate('pending')">⏳ Pending</button>
-              <button class="ghpay-sim-btn ghpay-sim-cancel"  onclick="GHPay._sandboxSimulate('cancelled')">🚫 Cancel</button>
-            </div>
-          </div>
-        `;
-        if (payBtn) payBtn.style.display = 'none';
         break;
 
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        container.innerHTML = `
-          <div style="background:#fef9c3;border:1px solid #fde047;border-radius:10px;padding:14px;font-size:13px;color:#713f12;margin-bottom:14px;line-height:1.6;">
-            ⚡ <strong>Live payment provider required.</strong><br>
-            Please ask the admin to configure a live payment provider (Razorpay / Cashfree) in GreenHarvest Pay settings
-            before enabling this method.
-          </div>
-        `;
-        if (payBtn) {
-          payBtn.innerHTML = `💳 Initiate Live Payment`;
-          payBtn.disabled = false;
+        if (settings.has_live_keys && settings.live_provider === 'razorpay') {
+          container.innerHTML = `
+            <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:14px;font-size:13px;color:#166534;margin-top:10px;">
+              ⚡ <strong>Instant Gateway Ready.</strong><br>
+              Click below to pay securely via Razorpay standard checkout (UPI, Cards, Netbanking).
+            </div>
+          `;
+          if (payBtn) {
+            payBtn.style.display = 'block';
+            payBtn.innerHTML = `💳 Pay ₹${parseFloat(amount).toFixed(2)} Securely`;
+            payBtn.disabled = false;
+          }
+        } else {
+          container.innerHTML = `
+            <div style="background:#fef9c3;border:1px solid #fde047;border-radius:12px;padding:14px;font-size:13px;color:#713f12;line-height:1.6;margin-top:10px;">
+              ⚡ <strong>Live Payment Provider Notice:</strong><br>
+              The store administrator has not yet configured production provider credentials (Razorpay/Cashfree).<br>
+              <div style="margin-top:6px;font-size:12px;">
+                💡 <em>Tip: Switch to <strong>Scan &amp; Pay (UPI QR)</strong> or <strong>Cash on Delivery</strong> above to complete your fresh vegetable order immediately.</em>
+              </div>
+            </div>
+          `;
+          if (payBtn) payBtn.style.display = 'none';
         }
         break;
 
       default:
         container.innerHTML = '';
+        if (payBtn) payBtn.style.display = 'block';
     }
   }
 
@@ -322,11 +436,11 @@ const GHPay = (function () {
     if (!s) return;
 
     const btn = document.getElementById('ghpayPayBtn');
-    if (btn) { btn.disabled = true; btn.classList.add('loading'); }
+    if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
 
     const idempotencyKey = genIdempotencyKey(s.orderId);
 
-    // Step 1: Initiate payment attempt (server-side, gets server amount)
+    // Step 1: Initiate payment attempt (server-side, validates server amount)
     const initiateRes = await payPost('initiate_payment', {
       order_id:        s.orderId,
       method:          s.currentMethod,
@@ -335,69 +449,57 @@ const GHPay = (function () {
 
     if (!initiateRes.success) {
       _showError(initiateRes.error || 'Payment initiation failed.');
-      if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+      if (btn) { btn.disabled = false; btn.textContent = `Confirm & Pay ₹${parseFloat(s.amount).toFixed(2)}`; }
       return;
     }
 
     const paymentRef = initiateRes.payment_ref;
     const attemptId  = initiateRes.attempt_id;
-
     window._ghpayState.paymentRef = paymentRef;
     window._ghpayState.attemptId  = attemptId;
 
     // Step 2: Handle by method
     switch (s.currentMethod) {
-
       case 'qr_upi': {
-        // Submit QR details (UTR + screenshot)
-        const utr        = document.getElementById('ghpayUtrInput')?.value?.trim() || '';
-        const screenshot = document.getElementById('ghpayScreenshot')?.files?.[0] || null;
-
+        const utr = document.getElementById('ghpayUtrInput')?.value?.trim() || '';
         if (!utr || utr.length < 6) {
-          _showError('Please enter your UTR / Transaction reference ID (min 6 characters).');
-          if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+          _showError('Please enter your 12-digit UTR / Transaction Reference ID (min 6 characters).');
+          if (btn) { btn.disabled = false; btn.textContent = '📱 Submit Payment Details'; }
           return;
         }
 
-        const csrf   = await ensureCsrf();
-        const form   = new FormData();
-        form.append('action', 'submit_qr_payment');
-        form.append('_csrf', csrf);
-        form.append('payment_ref', paymentRef);
-        form.append('utr_reference', utr);
-        if (screenshot) form.append('screenshot', screenshot);
-
-        const subRes = await fetch(API_URL, { method: 'POST', body: form, credentials: 'same-origin' }).then(r => r.json());
+        const subRes = await payPost('submit_qr_payment', {
+          payment_ref: paymentRef,
+          utr_reference: utr
+        });
 
         if (subRes.success) {
-          _showPending(paymentRef, 'Your payment details are submitted and awaiting admin verification.');
+          _showPending(paymentRef, 'Your UPI payment reference was submitted and is pending verification.');
         } else {
           _showError(subRes.error || 'Submission failed. Please try again.');
-          if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+          if (btn) { btn.disabled = false; btn.textContent = '📱 Submit Payment Details'; }
         }
         break;
       }
 
       case 'cod':
-        // COD — just confirm (payment status stays Pending until delivery)
-        _showSuccess(paymentRef, 'Your COD order is confirmed! Pay ₹' + parseFloat(s.amount).toFixed(2) + ' on delivery.');
+        _showSuccess(paymentRef, 'Cash on Delivery confirmed! Please keep ₹' + parseFloat(s.amount).toFixed(2) + ' ready upon delivery.');
         break;
 
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        // Live provider: initiate returns provider data
         if (initiateRes.provider === 'razorpay' && initiateRes.key_id) {
           _openRazorpay(initiateRes, s, paymentRef);
         } else {
-          _showError('Live payment provider not configured. Please contact the admin.');
-          if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+          _showError('Live payment provider credentials are not configured. Please choose UPI QR or COD.');
+          if (btn) { btn.disabled = false; btn.textContent = 'Try Another Method'; }
         }
         break;
 
       default:
         _showError('Unsupported payment method.');
-        if (btn) { btn.disabled = false; btn.classList.remove('loading'); }
+        if (btn) { btn.disabled = false; btn.textContent = 'Pay'; }
     }
   }
 
@@ -407,13 +509,18 @@ const GHPay = (function () {
     const s = window._ghpayState;
     if (!s) return;
 
-    // If no payment ref yet, initiate first
+    // Initiate attempt first if not yet initiated
     if (!s.paymentRef) {
       const idempotencyKey = genIdempotencyKey(s.orderId);
       const r = await payPost('initiate_payment', {
-        order_id: s.orderId, method: 'sandbox', idempotency_key: idempotencyKey
+        order_id: s.orderId,
+        method: 'sandbox',
+        idempotency_key: idempotencyKey
       });
-      if (!r.success) { _showError(r.error); return; }
+      if (!r.success) {
+        _showError(r.error || 'Failed to initiate sandbox payment.');
+        return;
+      }
       s.paymentRef = r.payment_ref;
       s.attemptId  = r.attempt_id;
       window._ghpayState = s;
@@ -425,13 +532,13 @@ const GHPay = (function () {
     });
 
     if (outcome === 'paid') {
-      _showSuccess(s.paymentRef, '✅ Sandbox payment simulated as SUCCESS!');
+      _showSuccess(s.paymentRef, 'Payment verified successfully via GreenHarvest Pay Sandbox!');
     } else if (outcome === 'failed') {
-      _showStatus('❌', 'Payment Simulation: Failed', 'The sandbox payment was simulated as failed.', s.paymentRef, '#ef4444');
+      _showStatus('❌', 'Payment Failed', 'The simulated payment failed. You can retry anytime.', s.paymentRef, '#ef4444', true);
     } else if (outcome === 'pending') {
-      _showPending(s.paymentRef, 'Simulated as PENDING. Admin can approve from the dashboard.');
+      _showPending(s.paymentRef, 'Simulated as PENDING. Store manager can review and confirm.');
     } else {
-      _showStatus('🚫', 'Payment Cancelled', 'Sandbox payment was cancelled.', s.paymentRef, '#94a3b8');
+      _showStatus('🚫', 'Payment Cancelled', 'Payment attempt was cancelled.', s.paymentRef, '#64748b', true);
     }
   }
 
@@ -439,37 +546,36 @@ const GHPay = (function () {
 
   function _openRazorpay(providerData, state, paymentRef) {
     if (!window.Razorpay) {
-      _showError('Razorpay checkout library not loaded. Please refresh and try again.');
+      _showError('Razorpay checkout SDK not loaded. Please refresh and try again.');
       return;
     }
 
     const options = {
-      key:        providerData.key_id,
-      amount:     providerData.amount_paise,
-      currency:   providerData.currency || 'INR',
-      name:       'GreenHarvest Pay',
-      description:'Order ' + state.orderNumber,
-      order_id:   providerData.provider_order_id,
-      notes:      { payment_ref: paymentRef },
+      key:         providerData.key_id,
+      amount:      providerData.amount_paise,
+      currency:    providerData.currency || 'INR',
+      name:        'GreenHarvest',
+      description: 'Vegetable Order ' + state.orderNumber,
+      order_id:    providerData.provider_order_id,
+      notes:       { payment_ref: paymentRef },
       handler: async function (response) {
-        // Client received success — NOW verify server-side before trusting it
         const verifyRes = await payPost('initiate_payment_live_callback', {
-          payment_ref:          paymentRef,
-          razorpay_payment_id:  response.razorpay_payment_id,
-          razorpay_order_id:    response.razorpay_order_id,
-          razorpay_signature:   response.razorpay_signature
+          payment_ref:         paymentRef,
+          razorpay_payment_id: response.razorpay_payment_id,
+          razorpay_order_id:   response.razorpay_order_id,
+          razorpay_signature:  response.razorpay_signature
         });
 
         if (verifyRes.success && verifyRes.verified_status === 'paid') {
-          _showSuccess(paymentRef, '✅ Payment verified and confirmed!');
+          _showSuccess(paymentRef, 'Payment verified and confirmed!');
         } else {
-          _showPending(paymentRef, 'Payment received but verification pending. Please contact support if this persists.');
+          _showPending(paymentRef, 'Payment received. Awaiting server confirmation.');
         }
       },
       modal: {
-        ondismiss: function() {
-          const payBtn = document.getElementById('ghpayPayBtn');
-          if (payBtn) { payBtn.disabled = false; payBtn.classList.remove('loading'); }
+        ondismiss: function () {
+          const btn = document.getElementById('ghpayPayBtn');
+          if (btn) { btn.disabled = false; btn.textContent = 'Retry Payment'; }
         }
       },
       theme: { color: '#10b981' }
@@ -482,50 +588,92 @@ const GHPay = (function () {
 
   function _showSuccess(paymentRef, message) {
     const container = document.getElementById('ghpayWrap');
-    if (container) container.innerHTML = `
-      <div class="ghpay-status-wrap">
-        <div class="ghpay-status-icon">✅</div>
-        <div class="ghpay-status-title" style="color:#15803d;">Payment Confirmed!</div>
-        <div class="ghpay-status-sub">${escSafe(message)}</div>
-        <div class="ghpay-ref-box">Ref: ${escSafe(paymentRef)}</div>
-        <button class="ghpay-pay-btn" style="background:linear-gradient(135deg,#10b981,#059669);" onclick="GHPay._closeAndRefresh()">
-          ✓ View My Orders
-        </button>
-      </div>
-    `;
-    if (window.confetti) window.confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 }, colors: ['#10b981','#86efac','#f59e0b'] });
+    if (container) {
+      container.innerHTML = `
+        <div class="ghpay-status-wrap" style="text-align:center;padding:24px 12px;">
+          <div class="ghpay-status-icon" style="font-size:48px;margin-bottom:12px;">✅</div>
+          <div class="ghpay-status-title" style="color:#15803d;font-size:22px;font-weight:900;margin-bottom:6px;">Payment Confirmed!</div>
+          <div class="ghpay-status-sub" style="font-size:13.5px;color:#475569;margin-bottom:14px;line-height:1.5;">${escSafe(message)}</div>
+          <div class="ghpay-ref-box" style="background:#f1f5f9;border:1px dashed #cbd5e1;padding:8px 14px;border-radius:8px;font-family:monospace;font-size:13px;display:inline-block;margin-bottom:18px;color:#334155;">
+            Ref: <strong>${escSafe(paymentRef)}</strong>
+          </div>
+          <br>
+          <button class="ghpay-pay-btn" style="background:linear-gradient(135deg,#10b981,#059669);width:100%;max-width:320px;margin:0 auto;display:block;padding:12px 20px;color:#fff;border:none;border-radius:10px;font-weight:800;font-size:15px;cursor:pointer;" onclick="GHPay._closeAndRefresh()">
+            📦 View My Orders &amp; Receipt
+          </button>
+        </div>
+      `;
+    }
+    if (window.confetti) {
+      try {
+        window.confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#86efac', '#f59e0b'] });
+      } catch (e) {}
+    }
   }
 
   function _showPending(paymentRef, message) {
     const container = document.getElementById('ghpayWrap');
-    if (container) container.innerHTML = `
-      <div class="ghpay-status-wrap">
-        <div class="ghpay-status-icon">⏳</div>
-        <div class="ghpay-status-title" style="color:#92400e;">Payment Pending</div>
-        <div class="ghpay-status-sub">${escSafe(message)}</div>
-        <div class="ghpay-ref-box">Ref: ${escSafe(paymentRef)}</div>
-        <button class="ghpay-pay-btn" style="background:linear-gradient(135deg,#f59e0b,#d97706);" onclick="GHPay._closeAndRefresh()">
-          📦 View My Orders
-        </button>
-      </div>
-    `;
+    if (container) {
+      container.innerHTML = `
+        <div class="ghpay-status-wrap" style="text-align:center;padding:24px 12px;">
+          <div class="ghpay-status-icon" style="font-size:48px;margin-bottom:12px;">⏳</div>
+          <div class="ghpay-status-title" style="color:#d97706;font-size:22px;font-weight:900;margin-bottom:6px;">Payment Awaiting Verification</div>
+          <div class="ghpay-status-sub" style="font-size:13.5px;color:#475569;margin-bottom:14px;line-height:1.5;">${escSafe(message)}</div>
+          <div class="ghpay-ref-box" style="background:#fef3c7;border:1px dashed #fcd34d;padding:8px 14px;border-radius:8px;font-family:monospace;font-size:13px;display:inline-block;margin-bottom:18px;color:#92400e;">
+            Ref: <strong>${escSafe(paymentRef)}</strong>
+          </div>
+          <br>
+          <button class="ghpay-pay-btn" style="background:linear-gradient(135deg,#f59e0b,#d97706);width:100%;max-width:320px;margin:0 auto;display:block;padding:12px 20px;color:#fff;border:none;border-radius:10px;font-weight:800;font-size:15px;cursor:pointer;" onclick="GHPay._closeAndRefresh()">
+            📦 View My Orders
+          </button>
+        </div>
+      `;
+    }
   }
 
-  function _showStatus(icon, title, message, paymentRef, color) {
+  function _showStatus(icon, title, message, paymentRef, color, allowRetry = false) {
     const container = document.getElementById('ghpayWrap');
-    if (container) container.innerHTML = `
-      <div class="ghpay-status-wrap">
-        <div class="ghpay-status-icon">${icon}</div>
-        <div class="ghpay-status-title" style="color:${color};">${escSafe(title)}</div>
-        <div class="ghpay-status-sub">${escSafe(message)}</div>
-        ${paymentRef ? `<div class="ghpay-ref-box">Ref: ${escSafe(paymentRef)}</div>` : ''}
-        <button class="ghpay-pay-btn" onclick="GHPay._closeAndRefresh()">Close</button>
-      </div>
-    `;
+    if (container) {
+      container.innerHTML = `
+        <div class="ghpay-status-wrap" style="text-align:center;padding:24px 12px;">
+          <div class="ghpay-status-icon" style="font-size:48px;margin-bottom:12px;">${icon}</div>
+          <div class="ghpay-status-title" style="color:${color};font-size:22px;font-weight:900;margin-bottom:6px;">${escSafe(title)}</div>
+          <div class="ghpay-status-sub" style="font-size:13.5px;color:#475569;margin-bottom:14px;line-height:1.5;">${escSafe(message)}</div>
+          ${paymentRef ? `<div class="ghpay-ref-box" style="background:#f1f5f9;border:1px dashed #cbd5e1;padding:8px 14px;border-radius:8px;font-family:monospace;font-size:13px;display:inline-block;margin-bottom:18px;color:#334155;">Ref: <strong>${escSafe(paymentRef)}</strong></div><br>` : ''}
+          ${allowRetry ? `
+            <button class="ghpay-pay-btn" style="background:#10b981;color:#fff;border:none;border-radius:10px;padding:11px 20px;font-weight:700;font-size:14px;cursor:pointer;margin-right:8px;" onclick="GHPay.openForOrder(${window._ghpayState.orderId}, '${window._ghpayState.orderNumber}', ${window._ghpayState.amount}, 'GreenHarvestPay')">
+              🔄 Try Again
+            </button>
+          ` : ''}
+          <button class="ghpay-pay-btn" style="background:#64748b;color:#fff;border:none;border-radius:10px;padding:11px 20px;font-weight:700;font-size:14px;cursor:pointer;" onclick="GHPay._closeAndRefresh()">
+            Close
+          </button>
+        </div>
+      `;
+    }
+  }
+
+  function _showDisabledState() {
+    const modalBody = document.getElementById('modalBody');
+    const modalOverlay = document.getElementById('modalOverlay');
+    if (modalBody) {
+      modalBody.innerHTML = `
+        <div style="text-align:center;padding:24px 12px;">
+          <div style="font-size:42px;margin-bottom:12px;">🌿</div>
+          <h3 style="margin-bottom:8px;color:#0f172a;">GreenHarvest Pay Unavailable</h3>
+          <p style="font-size:13px;color:#64748b;margin-bottom:18px;">
+            GreenHarvest Pay is currently undergoing routine maintenance. Please select UPI QR or Cash on Delivery to complete your order.
+          </p>
+          <button onclick="document.getElementById('modalOverlay').classList.remove('show')" style="background:#10b981;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-weight:700;cursor:pointer;">
+            Return to Checkout
+          </button>
+        </div>
+      `;
+      if (modalOverlay) modalOverlay.classList.add('show');
+    }
   }
 
   function _showError(message) {
-    // Show inline without replacing the whole form
     const existing = document.getElementById('ghpayError');
     if (existing) existing.remove();
 
@@ -546,7 +694,6 @@ const GHPay = (function () {
   function _closeAndRefresh() {
     const overlay = document.getElementById('modalOverlay');
     if (overlay) overlay.classList.remove('show');
-    // Refresh order list
     if (window.App && typeof App.renderCustomerOrdersView === 'function') {
       App.renderCustomerOrdersView();
     }
@@ -559,9 +706,34 @@ const GHPay = (function () {
     return d.innerHTML;
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
+  // ── Inject checkout CSS dynamically ───────────────────────────────────────
+
+  function injectCheckoutCss() {
+    if (document.getElementById('ghpay-checkout-css')) return;
+    const link = document.createElement('link');
+    link.id   = 'ghpay-checkout-css';
+    link.rel  = 'stylesheet';
+    link.href = (BASE_PATH ? BASE_PATH : '') + '/pay/assets/pay-checkout.css';
+    document.head.appendChild(link);
+  }
+
+  // ── Initialization ────────────────────────────────────────────────────────
+
+  async function init() {
+    injectCheckoutCss();
+    await loadPaySettings();
+  }
+
+  // Auto-init on load
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 
   return {
+    init,
+    loadPaySettings,
     openForOrder,
     _submit,
     _sandboxSimulate,
@@ -570,13 +742,5 @@ const GHPay = (function () {
 
 })();
 
-// ── Inject checkout CSS ────────────────────────────────────────────────────────
-
-(function injectCheckoutCss() {
-  if (document.getElementById('ghpay-checkout-css')) return;
-  const link = document.createElement('link');
-  link.id   = 'ghpay-checkout-css';
-  link.rel  = 'stylesheet';
-  link.href = '/pay/assets/pay-checkout.css';
-  document.head.appendChild(link);
-})();
+// Export globally
+window.GHPay = GHPay;

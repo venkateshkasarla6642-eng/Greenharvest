@@ -9,7 +9,7 @@
 const PayAdmin = (function() {
 
   let currentPage = { transactions: 1, audit: 1 };
-  const API = '/pay/api.php';
+  const API = 'api.php';
   const CSRF = window.GH_CSRF || '';
 
   // ─── Utility ────────────────────────────────────────────────────────────

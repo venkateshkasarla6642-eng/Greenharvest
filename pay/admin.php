@@ -10,8 +10,11 @@ $user = getCurrentUser();
 // ─── Server-side owner check — MUST be first ─────────────────────────────────
 if (!$user || $user['role'] !== 'owner') {
     // Do not reveal this page exists to non-owners
+    $scriptDir = dirname($_SERVER['SCRIPT_NAME'] ?? '');
+    $baseApp = rtrim(str_replace('\\', '/', dirname($scriptDir)), '/');
+    if (empty($baseApp)) $baseApp = '/';
     http_response_code(302);
-    header('Location: /');
+    header("Location: $baseApp");
     exit;
 }
 
@@ -27,10 +30,10 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <title>GreenHarvest Pay — Admin Dashboard</title>
   <meta name="robots" content="noindex,nofollow">
-  <link rel="icon" href="/assets/icons/favicon.png">
+  <link rel="icon" href="../assets/icons/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/pay/assets/pay.css?v=<?= filemtime(__DIR__ . '/assets/pay.css') ?>">
+  <link rel="stylesheet" href="assets/pay.css?v=<?= filemtime(__DIR__ . '/assets/pay.css') ?>">
 </head>
 <body class="pay-admin-body">
 
@@ -65,7 +68,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       <span class="pay-nav-icon">⚙️</span> Settings
     </a>
     <div class="pay-sidebar-divider"></div>
-    <a href="/" class="pay-nav-item pay-nav-back">
+    <a href="../" class="pay-nav-item pay-nav-back">
       <span class="pay-nav-icon">🥬</span> GreenHarvest Shop
     </a>
   </nav>
@@ -365,7 +368,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
 <script>window.GH_CSRF = "<?= htmlspecialchars($csrfToken) ?>";</script>
 <script>window.GH_OWNER = <?= json_encode(['name' => $user['name'], 'id' => $user['id']]) ?>;</script>
 
-<script src="/pay/assets/pay.js?v=<?= filemtime(__DIR__ . '/assets/pay.js') ?>"></script>
+<script src="assets/pay.js?v=<?= filemtime(__DIR__ . '/assets/pay.js') ?>"></script>
 
 </body>
 </html>

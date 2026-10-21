@@ -23,12 +23,12 @@ class PaymentService {
 
     // Valid state transitions
     private const TRANSITIONS = [
-        'initiated'  => ['pending', 'cancelled', 'expired'],
+        'initiated'  => ['pending', 'processing', 'paid', 'failed', 'cancelled', 'expired'],
         'pending'    => ['processing', 'paid', 'failed', 'cancelled', 'expired'],
         'processing' => ['paid', 'failed', 'cancelled'],
         'paid'       => ['refunded'],   // Only refund from paid
-        'failed'     => ['initiated'],  // Allow retry
-        'cancelled'  => [],             // Terminal
+        'failed'     => ['initiated', 'pending', 'paid'],  // Allow retry
+        'cancelled'  => ['initiated'],             // Allow retry
         'expired'    => ['initiated'],  // Allow retry
         'refunded'   => [],             // Terminal
     ];
@@ -38,7 +38,59 @@ class PaymentService {
         $this->audit   = new AuditLogger($db);
         $this->sandbox = new SandboxAdapter();
         $this->live    = new LiveAdapter();
+        $this->ensureSchema();
         $this->settings = $this->loadSettings();
+    }
+
+    // ─── Auto-migration ──────────────────────────────────────────────────────
+
+    private function ensureSchema(): void {
+        try {
+            $exists = $this->db->query("SELECT 1 FROM information_schema.tables WHERE table_name = 'gh_pay_settings'")->fetchColumn();
+            if (!$exists) {
+                $this->runMigration();
+            }
+        } catch (\Throwable $e) {
+            error_log('[GHPay] ensureSchema check error: ' . $e->getMessage());
+        }
+    }
+
+    private function runMigration(): void {
+        $file = __DIR__ . '/../migrations/001_greenharvest_pay.sql';
+        if (!file_exists($file)) return;
+        $sql = file_get_contents($file);
+
+        $statements = [];
+        $current = '';
+        $inDollarQuote = false;
+        $lines = explode("\n", $sql);
+        foreach ($lines as $line) {
+            $current .= $line . "\n";
+            if (substr_count($line, '$$') % 2 !== 0) {
+                $inDollarQuote = !$inDollarQuote;
+            }
+            if (!$inDollarQuote && (str_ends_with(rtrim($line), ';') || rtrim($line) === '$$')) {
+                $trimmed = trim($current);
+                if (!empty($trimmed) && $trimmed !== 'BEGIN;' && $trimmed !== 'COMMIT;') {
+                    $statements[] = $trimmed;
+                }
+                $current = '';
+            }
+        }
+        if (!empty(trim($current)) && trim($current) !== 'BEGIN;' && trim($current) !== 'COMMIT;') {
+            $statements[] = trim($current);
+        }
+
+        foreach ($statements as $stmt) {
+            $t = trim($stmt);
+            if (!empty($t) && $t !== ';') {
+                try {
+                    $this->db->exec($t);
+                } catch (\Throwable $e) {
+                    error_log('[GHPay] migration stmt error: ' . $e->getMessage() . ' | SQL: ' . substr($t, 0, 80));
+                }
+            }
+        }
     }
 
     // ─── Settings ────────────────────────────────────────────────────────────
@@ -55,6 +107,27 @@ class PaymentService {
 
     public function getSettings(): array {
         return $this->settings;
+    }
+
+    public function getPublicSettings(): array {
+        $s = $this->settings;
+        $isLive = $this->isLiveMode();
+        $provider = $s['live_provider'] ?? 'none';
+        $keyEnv = $s['provider_key_env'] ?? 'GH_LIVE_KEY_ID';
+        $hasLiveKeys = !empty($keyEnv) && !empty(getenv($keyEnv));
+
+        return [
+            'success'               => true,
+            'enabled'               => (int)($s['manual_verify_enabled'] ?? 1) === 1,
+            'mode'                  => $s['mode'] ?? 'sandbox',
+            'is_sandbox'            => !$isLive,
+            'enabled_methods'       => $s['enabled_methods'] ?? 'qr_upi,cod,sandbox',
+            'live_provider'         => $provider,
+            'has_live_keys'         => $hasLiveKeys,
+            'upi_id'                => $s['upi_id'] ?? '',
+            'qr_image_path'         => $s['qr_image_path'] ?? '',
+            'sandbox_auto_approve'  => (bool)($s['sandbox_auto_approve'] ?? 0)
+        ];
     }
 
     public function isLiveMode(): bool {
@@ -335,9 +408,9 @@ class PaymentService {
             };
 
             $updOrder = $this->db->prepare(
-                "UPDATE orders SET payment_status = ? WHERE id = ?"
+                "UPDATE orders SET payment_status = ?, upi_trans_id = COALESCE(NULLIF(upi_trans_id, ''), ?) WHERE id = ?"
             );
-            $updOrder->execute([$orderPaymentStatus, $attempt['order_id']]);
+            $updOrder->execute([$orderPaymentStatus, $attempt['payment_ref'], $attempt['order_id']]);
 
             $this->db->commit();
         } catch (\Throwable $e) {

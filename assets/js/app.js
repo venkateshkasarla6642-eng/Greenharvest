@@ -360,8 +360,18 @@ const App = (() => {
 
         <div class="form-group">
           <label class="form-label">Payment Method</label>
-          <div class="pay-option selected" id="pay_scanpay" onclick="selectPay('ScanPay', this)">
-            <input type="radio" name="payMethod" value="ScanPay" checked>
+          <div class="pay-option selected" id="pay_ghpay" onclick="selectPay('GreenHarvestPay', this)">
+            <input type="radio" name="payMethod" value="GreenHarvestPay" checked>
+            <div>
+              <div class="pay-option-label" style="display:flex;align-items:center;gap:6px;">
+                <span>🌿</span> <strong>GreenHarvest Pay</strong>
+                <span style="background:#10b981;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;letter-spacing:0.4px;">RECOMMENDED</span>
+              </div>
+              <div class="pay-option-sub">Fast &amp; Verified UPI, Cards &amp; Netbanking</div>
+            </div>
+          </div>
+          <div class="pay-option" id="pay_scanpay" onclick="selectPay('ScanPay', this)">
+            <input type="radio" name="payMethod" value="ScanPay">
             <div><div class="pay-option-label">📷 SCAN &amp; PAY (UPI QR)</div><div class="pay-option-sub">Scan QR with GPay / PhonePe / Paytm</div></div>
           </div>
           <div class="pay-option" id="pay_gpay" onclick="selectPay('GPay', this)">
@@ -378,8 +388,29 @@ const App = (() => {
           </div>
         </div>
 
+        <!-- GREENHARVEST PAY BRANDED SECTION -->
+        <div id="ghpaySection" style="background:linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%); border:1.5px solid #86efac; border-radius:12px; padding:13px 15px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:18px;">🌿💳</span>
+              <strong style="color:#065f46; font-size:13.5px;">GreenHarvest Pay Instant Checkout</strong>
+            </div>
+            <span style="font-size:10.5px; font-weight:800; padding:2px 8px; border-radius:100px; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0;">
+              VERIFIED
+            </span>
+          </div>
+          <p style="font-size:12px; color:#166534; margin:0 0 8px 0; line-height:1.4;">
+            Order-linked digital payment with instant server-side verification. Supports UPI apps, Debit/Credit Cards, and Netbanking.
+          </p>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; font-size:11px; color:#047857;">
+            <span style="background:#fff; padding:2px 7px; border-radius:5px; border:1px solid #a7f3d0;">🔒 256-Bit SSL</span>
+            <span style="background:#fff; padding:2px 7px; border-radius:5px; border:1px solid #a7f3d0;">⚡ Zero Wait</span>
+            <span style="background:#fff; padding:2px 7px; border-radius:5px; border:1px solid #a7f3d0;">🧾 Instant Receipt</span>
+          </div>
+        </div>
+
         <!-- SCAN & PAY QR section -->
-        <div id="scanPaySection">
+        <div id="scanPaySection" style="display:none;">
           <div class="qr-box">
             <h4 style="margin-bottom:8px;">📷 Shop's Official UPI QR Code</h4>
             <p class="text-xs text-muted" style="margin-bottom:12px;">Scan using Google Pay, PhonePe, Paytm or any UPI app</p>
@@ -399,8 +430,8 @@ const App = (() => {
           <div class="flex justify-between mt-1"><span>Est. Delivery:</span><strong>${state.settings.estimated_delivery_time}</strong></div>
         </div>
 
-        <button type="submit" class="btn-checkout" style="margin:0;">
-          🎉 Place Order — ${rupee(total)}
+        <button type="submit" class="btn-checkout" style="margin:0; background:linear-gradient(135deg, #10b981 0%, #059669 100%);">
+          🌿 Pay ${rupee(total)} with GreenHarvest Pay
         </button>
       </form>
     `);
@@ -452,6 +483,19 @@ const App = (() => {
       el.classList.add('selected');
       el.querySelector('input').checked = true;
       qs('#scanPaySection').style.display = (val === 'ScanPay' || val === 'GPay') ? 'block' : 'none';
+      if (qs('#ghpaySection')) {
+        qs('#ghpaySection').style.display = (val === 'GreenHarvestPay') ? 'block' : 'none';
+      }
+      const sBtn = qs('#checkoutForm button[type="submit"]');
+      if (sBtn) {
+        if (val === 'GreenHarvestPay') {
+          sBtn.innerHTML = `🌿 Pay ${rupee(total)} with GreenHarvest Pay`;
+          sBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        } else {
+          sBtn.innerHTML = `🎉 Place Order — ${rupee(total)}`;
+          sBtn.style.background = '';
+        }
+      }
     };
 
     qs('#checkoutForm').onsubmit = async (e) => {
@@ -478,11 +522,16 @@ const App = (() => {
         state.lastOrderId = res.order_id;
         cartClear();
         state.coupon = null;
-        showOrderConfirmation(res);
+
+        if (method === 'GreenHarvestPay' && window.GHPay && typeof GHPay.openForOrder === 'function') {
+          GHPay.openForOrder(res.order_id, res.order_number, res.total_amount, 'GreenHarvestPay');
+        } else {
+          showOrderConfirmation(res);
+        }
       } else {
         toast(res.error || 'Failed to place order', 'error');
         btn.disabled = false;
-        btn.textContent = `🎉 Place Order — ${rupee(total)}`;
+        btn.textContent = (method === 'GreenHarvestPay') ? `🌿 Pay ${rupee(total)} with GreenHarvest Pay` : `🎉 Place Order — ${rupee(total)}`;
       }
     };
   }
@@ -1357,6 +1406,11 @@ const App = (() => {
                         </div>
                       ` : ''}
 
+                      ${(ord.payment_status === 'Pending' && !['Rejected', 'Cancelled'].includes(ord.order_status)) ? `
+                        <button class="os-btn" onclick="GHPay.openForOrder(${ord.id}, '${escapeHtml(ord.order_number)}', ${ord.total_amount}, '${escapeHtml(ord.payment_method)}')" style="background:linear-gradient(135deg,#10b981,#059669); color:#fff; border:none; font-weight:700;" title="Complete Payment">
+                          🌿 Pay Now
+                        </button>
+                      ` : ''}
                       <button class="os-btn" onclick="App.reorderItems(${ord.id})" title="Add items to cart">
                         🥕 Reorder
                       </button>
@@ -4406,7 +4460,8 @@ const App = (() => {
       qs('#smCustSupport')?.addEventListener('click', () => { closeSideMenu(); openChat(); });
       qs('#smCustLogout')?.addEventListener('click', () => { closeSideMenu(); logout(); });
       pwaBtn.bind();
-    } else if (state.role === 'shopkeeper') {
+    } else if (state.role === 'shopkeeper' || state.role === 'owner') {
+      const isOwner = (state.role === 'owner');
       const curHash = window.location.hash.replace('#', '') || 'dashboard';
       container.innerHTML = `
         <div class="side-menu-profile-card">
@@ -4418,14 +4473,19 @@ const App = (() => {
             `}
             <div style="flex:1; min-width:0;">
               <div class="side-menu-user-name">${escapeHtml(state.user.name)}</div>
-              <div class="side-menu-user-role">Shop Manager Portal</div>
+              <div class="side-menu-user-role">${isOwner ? '👑 Store Owner &amp; Gateway Admin' : 'Shop Manager Portal'}</div>
             </div>
           </div>
         </div>
         <div class="side-menu-nav-list">
           <button class="side-menu-nav-item ${(curHash === 'dashboard' || curHash === '') ? 'active' : ''}" id="smShopDashboard">
-            <span class="icon">📊</span> Shopkeeper Dashboard
+            <span class="icon">📊</span> ${isOwner ? 'Store &amp; Orders Dashboard' : 'Shopkeeper Dashboard'}
           </button>
+          ${isOwner ? `
+            <a href="pay/admin.php" class="side-menu-nav-item" id="smOwnerGHPay" style="background:#f0fdf4; border:1.5px solid #86efac; color:#15803d; font-weight:800;">
+              <span class="icon">🌿💳</span> GreenHarvest Pay Admin
+            </a>
+          ` : ''}
           <button class="side-menu-nav-item ${curHash === 'orders' ? 'active' : ''}" id="smShopOrders">
             <span class="icon">📦</span> Order Management
           </button>
@@ -4928,6 +4988,8 @@ const App = (() => {
     openShopOrderDetailsModal,
     toggleShopkeeperLocationSharing,
     stopLiveTracking,
+    showOrderConfirmation,
+    checkout,
     getState: () => state,
   };
 })();

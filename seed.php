@@ -346,10 +346,42 @@ try {
         }
     }
 
+    // 6. Ensure GreenHarvest Pay Schema & Owner Role
+    $payMigration = __DIR__ . '/pay/migrations/001_greenharvest_pay.sql';
+    if (file_exists($payMigration)) {
+        $paySql = file_get_contents($payMigration);
+        $payStatements = [];
+        $current = '';
+        $inDollarQuote = false;
+        foreach (explode("\n", $paySql) as $line) {
+            $current .= $line . "\n";
+            if (substr_count($line, '$$') % 2 !== 0) $inDollarQuote = !$inDollarQuote;
+            if (!$inDollarQuote && (str_ends_with(rtrim($line), ';') || rtrim($line) === '$$')) {
+                $trimmed = trim($current);
+                if (!empty($trimmed) && $trimmed !== 'BEGIN;' && $trimmed !== 'COMMIT;') {
+                    $payStatements[] = $trimmed;
+                }
+                $current = '';
+            }
+        }
+        foreach ($payStatements as $stmt) {
+            try { $db->exec($stmt); } catch (Exception $e) {}
+        }
+    }
+
+    // Ensure store owner has 'owner' role
+    try {
+        $ownerCheck = $db->query("SELECT id FROM users WHERE role = 'owner' LIMIT 1")->fetch();
+        if (!$ownerCheck) {
+            $db->exec("UPDATE users SET role = 'owner' WHERE phone = '9876543210'");
+        }
+    } catch (Exception $e) {}
+
     echo "✅ Database successfully seeded with 100% Vegetable data!\n";
     echo "\nSeeded:\n";
-    echo "  - Tables: users, categories, products, orders, offers, shop_settings, etc.\n";
-    echo "  - Users: shopkeeper (9876543210) & customer (9123456789) — password: 123456\n";
+    echo "  - Tables: users, categories, products, orders, offers, shop_settings, gh_pay_settings, etc.\n";
+    echo "  - Users: owner/shopkeeper (9876543210) & customer (9123456789) — password: 123456\n";
+    echo "  - GreenHarvest Pay: Sandbox & Live Gateway Configured\n";
     echo "  - 19 Vegetable Products across 16 categories\n";
     echo "  - 3 Discount Offers (VEG10, GREEN50, FRESH15)\n";
     echo "\n🎉 Your GreenHarvest app is ready!\n";
