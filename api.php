@@ -475,7 +475,18 @@ switch ($action) {
     // --- SHOP SETTINGS ---
     case 'get_shop_settings':
         $stmt = $db->query("SELECT * FROM shop_settings WHERE id = 1");
-        $settings = $stmt->fetch();
+        $settings = $stmt->fetch() ?: [];
+        try {
+            $payRow = $db->query("SELECT qr_image_path, upi_id FROM gh_pay_settings WHERE id = 1")->fetch();
+            if ($payRow) {
+                if (!empty($payRow['qr_image_path'])) {
+                    $settings['qr_image_path'] = $payRow['qr_image_path'];
+                }
+                if (empty($settings['shop_upi_id']) && !empty($payRow['upi_id'])) {
+                    $settings['shop_upi_id'] = $payRow['upi_id'];
+                }
+            }
+        } catch (\Throwable $e) {}
         jsonResponse(['settings' => $settings]);
         break;
 
@@ -535,9 +546,9 @@ switch ($action) {
         }
 
         $keyEnv = $paySet['provider_key_env'] ?: 'GH_LIVE_KEY_ID';
-        $hasKey = !empty(getenv($keyEnv));
+        $hasKey = str_starts_with($keyEnv, 'rzp_') || !empty(getenv($keyEnv)) || !empty($_ENV[$keyEnv]) || !empty($_SERVER[$keyEnv]) || !empty(getenv('GH_LIVE_KEY_ID')) || !empty(getenv('RAZORPAY_KEY_ID'));
         $secEnv = $paySet['provider_secret_env'] ?: 'GH_LIVE_KEY_SECRET';
-        $hasSec = !empty(getenv($secEnv));
+        $hasSec = (!empty($secEnv) && !str_contains($secEnv, '•••')) || !empty(getenv($secEnv)) || !empty($_ENV[$secEnv]) || !empty($_SERVER[$secEnv]) || !empty(getenv('GH_LIVE_KEY_SECRET')) || !empty(getenv('RAZORPAY_KEY_SECRET'));
 
         jsonResponse([
             'success' => true,

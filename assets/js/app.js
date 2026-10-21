@@ -425,7 +425,10 @@ const App = (() => {
           <div class="qr-box">
             <h4 style="margin-bottom:8px;">📷 Shop's Official UPI QR Code</h4>
             <p class="text-xs text-muted" style="margin-bottom:12px;">Scan using Google Pay, PhonePe, Paytm or any UPI app</p>
-            <img src="https://api.qrserver.com/v1/create-qr-code/?size=175x175&data=upi://pay?pa=${state.settings.shop_upi_id}%26pn=GreenHarvest%26am=${total.toFixed(2)}%26cu=INR" alt="UPI QR Code">
+            ${(state.settings && state.settings.qr_image_path)
+              ? `<img src="${state.settings.qr_image_path.startsWith('http') ? state.settings.qr_image_path : '/' + state.settings.qr_image_path.replace(/^\//, '')}" alt="UPI QR Code" style="max-width:220px;max-height:220px;width:auto;height:auto;border-radius:12px;margin:0 auto 10px auto;display:block;border:1px solid #cbd5e1;padding:6px;background:#fff;object-fit:contain;">`
+              : `<img src="https://api.qrserver.com/v1/create-qr-code/?size=175x175&data=upi://pay?pa=${encodeURIComponent((state.settings && state.settings.shop_upi_id) || 'greenharvest@upi')}%26pn=GreenHarvest%26am=${total.toFixed(2)}%26cu=INR" alt="UPI QR Code">`
+            }
             <p style="font-weight:800; color:var(--primary-deep); font-size:14px; margin-top:6px;">${state.settings.shop_upi_id}</p>
             <p style="font-size:12px; color:var(--slate-500);">Amount: <strong>${rupee(total)}</strong></p>
           </div>

@@ -718,7 +718,41 @@ const PayAdmin = (function() {
           ${res.key_id ? `<br><small style="color:#047857;">Active Key: <code>${esc(res.key_id)}</code></small>` : ''}
         </div>
       `;
-      await loadSettings();
+      // Ensure Live mode radio stays selected
+      const modeLive = document.getElementById('modeLive');
+      if (modeLive) modeLive.checked = true;
+      const provEl = document.getElementById('liveProvider');
+      if (provEl) {
+        provEl.value = 'razorpay';
+        toggleProviderFields();
+      }
+      // Ensure live methods checkboxes are checked
+      const cbLiveUpi = document.querySelector('input[name="method_live_upi"]');
+      if (cbLiveUpi) cbLiveUpi.checked = true;
+      const cbLiveCard = document.querySelector('input[name="method_live_card"]');
+      if (cbLiveCard) cbLiveCard.checked = true;
+
+      // Update banner directly
+      const statusBanner = document.getElementById('credentialsStatusBanner');
+      if (statusBanner) {
+        statusBanner.style.display = 'flex';
+        statusBanner.style.background = '#ecfdf5';
+        statusBanner.style.border = '1.5px solid #a7f3d0';
+        statusBanner.style.color = '#065f46';
+        statusBanner.style.alignItems = 'center';
+        statusBanner.style.gap = '10px';
+        statusBanner.innerHTML = `
+          <div style="font-size:24px;">✅</div>
+          <div>
+            <div style="font-weight:800;font-size:14px;">Razorpay Connected &amp; Active!</div>
+            <div style="font-size:12px;opacity:0.9;margin-top:2px;">
+              Key: <code>${esc(res.key_id || keyId)}</code> &bull;
+              Mode: <strong style="color:${res.is_test ? '#2563eb' : '#16a34a'};">${res.is_test ? '🧪 Test Mode (rzp_test)' : '🟢 Live Production'}</strong> &bull;
+              Active &amp; ready to process customer orders.
+            </div>
+          </div>
+        `;
+      }
     } else {
       resultEl.innerHTML = `
         <div style="background:#fef2f2;border:1px solid #ef4444;color:#991b1b;border-radius:8px;padding:10px 12px;line-height:1.5;">

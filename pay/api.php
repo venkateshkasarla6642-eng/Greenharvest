@@ -695,6 +695,10 @@ switch ($action) {
             $webhook_secret_env = $currentSettings['webhook_secret_env'];
         }
 
+        if (str_starts_with($provider_key_env, 'rzp_') && ($live_provider === 'none' || empty($live_provider))) {
+            $live_provider = 'razorpay';
+        }
+
         if (!in_array($mode, ['sandbox', 'live'])) {
             jsonResponse(['error' => 'Invalid mode.'], 400);
         }
@@ -721,6 +725,13 @@ switch ($action) {
             $upi_id ?: null, $manual_verify, $sandbox_auto,
             $owner['id']
         ]);
+
+        // Sync upi_id to shop_settings if not empty
+        if (!empty($upi_id)) {
+            try {
+                $db->prepare("UPDATE shop_settings SET shop_upi_id = ? WHERE id = 1")->execute([$upi_id]);
+            } catch (\Throwable $e) {}
+        }
 
         // Audit the settings change
         $auditLogger = new AuditLogger($db);
@@ -749,8 +760,28 @@ switch ($action) {
                 'provider_secret_env' => $testSecret
             ]);
             $res = $testAdapter->testConnection();
+            if ($res['success']) {
+                try {
+                    $db->prepare("UPDATE gh_pay_settings SET
+                        mode = 'live',
+                        live_provider = 'razorpay',
+                        provider_key_env = ?,
+                        provider_secret_env = ?,
+                        updated_at = NOW()
+                        WHERE id = 1")->execute([$testKey, $testSecret]);
+                } catch (\Throwable $e) {}
+            }
         } else {
             $res = $payService->getLiveAdapter()->testConnection();
+            if ($res['success']) {
+                try {
+                    $db->prepare("UPDATE gh_pay_settings SET
+                        mode = 'live',
+                        live_provider = 'razorpay',
+                        updated_at = NOW()
+                        WHERE id = 1")->execute();
+                } catch (\Throwable $e) {}
+            }
         }
         jsonResponse($res);
         break;
@@ -789,6 +820,12 @@ switch ($action) {
 
         $path = 'uploads/pay_qr/' . $name;
         $db->prepare("UPDATE gh_pay_settings SET qr_image_path = ? WHERE id = 1")->execute([$path]);
+
+        // Sync to shop_settings
+        try {
+            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS qr_image_path VARCHAR(255) DEFAULT ''");
+            $db->prepare("UPDATE shop_settings SET qr_image_path = ? WHERE id = 1")->execute([$path]);
+        } catch (\Throwable $e) {}
 
         $auditLogger = new AuditLogger($db);
         $auditLogger->log('qr_image_uploaded', ['path' => $path], $owner['id'], 'settings', 1);

@@ -459,7 +459,7 @@ const GHPay = (function () {
             <h4 style="margin:0 0 4px 0;color:#0f172a;font-size:14px;">📷 Official GreenHarvest UPI QR</h4>
             <p style="font-size:12px;color:#64748b;margin:0 0 12px 0;">Scan with GPay, PhonePe, Paytm, or any UPI app</p>
             ${qrImgSrc
-              ? `<img class="ghpay-qr-img" src="${escSafe(qrImgSrc)}" alt="UPI QR Code" style="width:160px;height:160px;border-radius:8px;border:1px solid #cbd5e1;padding:6px;background:#fff;margin:0 auto 10px auto;display:block;">`
+              ? `<img class="ghpay-qr-img" src="${escSafe(qrImgSrc)}" alt="UPI QR Code" style="max-width:240px;max-height:240px;width:auto;height:auto;border-radius:10px;border:1px solid #cbd5e1;padding:6px;background:#fff;margin:0 auto 10px auto;display:block;object-fit:contain;">`
               : `<div style="padding:20px;color:#64748b;font-size:12px;border:1px dashed #cbd5e1;border-radius:8px;margin-bottom:10px;">Official QR Code active for: <strong>${escSafe(upiId || 'GreenHarvest UPI')}</strong></div>`
             }
             ${upiId ? `<div class="ghpay-upi-id" style="font-weight:800;color:#047857;font-size:13.5px;margin-bottom:4px;">${escSafe(upiId)}</div>` : ''}
@@ -498,7 +498,8 @@ const GHPay = (function () {
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        if (settings.has_live_keys && settings.live_provider === 'razorpay') {
+        const isRazorpayReady = (settings.has_live_keys || (settings.live_key_id && settings.live_key_id.startsWith('rzp_'))) && (settings.live_provider === 'razorpay' || (settings.live_key_id && settings.live_key_id.startsWith('rzp_')));
+        if (isRazorpayReady) {
           container.innerHTML = `
             <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:14px;font-size:13px;color:#166534;margin-top:10px;">
               ⚡ <strong>Instant Gateway Ready.</strong><br>

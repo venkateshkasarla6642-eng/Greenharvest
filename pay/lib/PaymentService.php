@@ -163,7 +163,16 @@ class PaymentService {
         if ($provider === 'none' && !empty($s['live_provider'])) {
             $provider = $s['live_provider'];
         }
+        $keyId = $this->live->getKeyId();
+        if (empty($provider) || $provider === 'none') {
+            if (!empty($keyId) && str_starts_with($keyId, 'rzp_')) {
+                $provider = 'razorpay';
+            }
+        }
         $hasLiveKeys = $this->live->isConfigured();
+        if (!$hasLiveKeys && !empty($keyId) && str_starts_with($keyId, 'rzp_') && !empty($this->live->getKeySecret())) {
+            $hasLiveKeys = true;
+        }
 
         return [
             'success'               => true,
@@ -173,7 +182,7 @@ class PaymentService {
             'enabled_methods'       => $s['enabled_methods'] ?? 'qr_upi,cod,sandbox',
             'live_provider'         => $provider,
             'has_live_keys'         => $hasLiveKeys,
-            'live_key_id'           => $hasLiveKeys ? $this->live->getKeyId() : '',
+            'live_key_id'           => $keyId,
             'is_test_key'           => $this->live->isTestMode(),
             'upi_id'                => $s['upi_id'] ?? '',
             'qr_image_path'         => $s['qr_image_path'] ?? '',

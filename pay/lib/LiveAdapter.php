@@ -28,6 +28,22 @@ class LiveAdapter {
     }
 
     /**
+     * Unified environment variable reader: checks getenv(), $_ENV, and $_SERVER.
+     */
+    private function getEnvVal(string $key): ?string {
+        if (getenv($key) !== false && getenv($key) !== '') {
+            return (string)getenv($key);
+        }
+        if (isset($_ENV[$key]) && $_ENV[$key] !== '') {
+            return (string)$_ENV[$key];
+        }
+        if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
+            return (string)$_SERVER[$key];
+        }
+        return null;
+    }
+
+    /**
      * Smart credentials resolver:
      * Supports BOTH direct API keys entered in admin settings AND Render environment variable names.
      */
@@ -36,8 +52,9 @@ class LiveAdapter {
         $rawKey = trim($this->settings['provider_key_env'] ?? '');
         $resolvedKey = '';
         if (!empty($rawKey)) {
-            if (getenv($rawKey)) {
-                $resolvedKey = getenv($rawKey);
+            $val = $this->getEnvVal($rawKey);
+            if (!empty($val)) {
+                $resolvedKey = $val;
             } else {
                 $resolvedKey = $rawKey; // Direct key string (e.g. rzp_test_... or rzp_live_...)
             }
@@ -49,7 +66,7 @@ class LiveAdapter {
                 'RZP_KEY', 'KEY_ID', 'API_KEY'
             ];
             foreach ($candidates as $cand) {
-                $v = getenv($cand);
+                $v = $this->getEnvVal($cand);
                 if (!empty($v) && ($cand !== 'API_KEY' || str_starts_with($v, 'rzp_'))) {
                     $resolvedKey = trim($v);
                     break;
@@ -61,9 +78,10 @@ class LiveAdapter {
         // 2. Resolve Key Secret
         $rawSecret = trim($this->settings['provider_secret_env'] ?? '');
         $resolvedSecret = '';
-        if (!empty($rawSecret)) {
-            if (getenv($rawSecret)) {
-                $resolvedSecret = getenv($rawSecret);
+        if (!empty($rawSecret) && !str_contains($rawSecret, '•••')) {
+            $val = $this->getEnvVal($rawSecret);
+            if (!empty($val)) {
+                $resolvedSecret = $val;
             } else {
                 $resolvedSecret = $rawSecret;
             }
@@ -71,11 +89,12 @@ class LiveAdapter {
         if (empty($resolvedSecret)) {
             $candidates = [
                 'GH_LIVE_KEY_SECRET', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_SECRET',
-                'RAZORPAY_API_SECRET', 'RZP_KEY_SECRET', 'RZP_TEST_KEY_SECRET',
-                'RZP_SECRET', 'KEY_SECRET', 'API_SECRET'
+                'RAZORPAY_SECRET_KEY', 'RAZORPAY_API_SECRET', 'RZP_KEY_SECRET',
+                'RZP_TEST_KEY_SECRET', 'RZP_SECRET', 'KEY_SECRET', 'API_SECRET',
+                'SECRET_KEY'
             ];
             foreach ($candidates as $cand) {
-                $v = getenv($cand);
+                $v = $this->getEnvVal($cand);
                 if (!empty($v)) {
                     $resolvedSecret = trim($v);
                     break;
@@ -88,8 +107,9 @@ class LiveAdapter {
         $rawWebhook = trim($this->settings['webhook_secret_env'] ?? '');
         $resolvedWebhook = '';
         if (!empty($rawWebhook)) {
-            if (getenv($rawWebhook)) {
-                $resolvedWebhook = getenv($rawWebhook);
+            $val = $this->getEnvVal($rawWebhook);
+            if (!empty($val)) {
+                $resolvedWebhook = $val;
             } else {
                 $resolvedWebhook = $rawWebhook;
             }
@@ -99,7 +119,7 @@ class LiveAdapter {
                 'GH_WEBHOOK_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'WEBHOOK_SECRET'
             ];
             foreach ($candidates as $cand) {
-                $v = getenv($cand);
+                $v = $this->getEnvVal($cand);
                 if (!empty($v)) {
                     $resolvedWebhook = trim($v);
                     break;
@@ -111,7 +131,7 @@ class LiveAdapter {
         // 4. Resolve Provider Name
         $prov = trim($this->settings['live_provider'] ?? '');
         if (empty($prov) || $prov === 'none') {
-            $prov = getenv('GH_LIVE_PROVIDER') ?: '';
+            $prov = $this->getEnvVal('GH_LIVE_PROVIDER') ?: '';
         }
         if (empty($prov) || $prov === 'none') {
             if (str_starts_with($this->keyId, 'rzp_')) {
@@ -125,6 +145,9 @@ class LiveAdapter {
 
     /** Check if live provider is properly configured (requires provider, keyId, keySecret). */
     public function isConfigured(): bool {
+        if (!empty($this->keyId) && str_starts_with($this->keyId, 'rzp_')) {
+            $this->provider = 'razorpay';
+        }
         return $this->provider !== 'none'
             && !empty($this->keyId)
             && !empty($this->keySecret);
