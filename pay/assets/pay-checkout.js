@@ -272,7 +272,9 @@ const GHPay = (function () {
     // Build QR image URL
     let qrImgSrc = '';
     if (qrPath) {
-      qrImgSrc = qrPath.startsWith('http') ? qrPath : ((BASE_PATH ? BASE_PATH : '') + '/' + qrPath.replace(/^\//, ''));
+      qrImgSrc = (qrPath.startsWith('http') || qrPath.startsWith('data:'))
+        ? qrPath
+        : ((BASE_PATH ? BASE_PATH : '') + '/' + qrPath.replace(/^\//, ''));
     } else if (upiId) {
       qrImgSrc = `https://api.qrserver.com/v1/create-qr-code/?size=175x175&data=upi://pay?pa=${encodeURIComponent(upiId)}%26pn=GreenHarvest%26am=${parseFloat(amount).toFixed(2)}%26cu=INR`;
     }

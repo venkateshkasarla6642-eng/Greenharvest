@@ -28,7 +28,7 @@ class LiveAdapter {
     }
 
     /**
-     * Unified environment variable reader: checks getenv(), $_ENV, and $_SERVER.
+     * Unified environment variable reader: checks getenv(), $_ENV, $_SERVER, and /proc/1/environ (for Docker containers on Render).
      */
     private function getEnvVal(string $key): ?string {
         if (getenv($key) !== false && getenv($key) !== '') {
@@ -39,6 +39,25 @@ class LiveAdapter {
         }
         if (isset($_SERVER[$key]) && $_SERVER[$key] !== '') {
             return (string)$_SERVER[$key];
+        }
+        static $procEnv = null;
+        if ($procEnv === null) {
+            $procEnv = [];
+            if (@is_readable('/proc/1/environ')) {
+                $content = @file_get_contents('/proc/1/environ');
+                if ($content !== false) {
+                    $entries = explode("\0", $content);
+                    foreach ($entries as $entry) {
+                        $parts = explode('=', $entry, 2);
+                        if (count($parts) === 2) {
+                            $procEnv[$parts[0]] = $parts[1];
+                        }
+                    }
+                }
+            }
+        }
+        if (isset($procEnv[$key]) && $procEnv[$key] !== '') {
+            return (string)$procEnv[$key];
         }
         return null;
     }

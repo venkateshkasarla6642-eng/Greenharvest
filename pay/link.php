@@ -28,7 +28,7 @@ $upiIntentUrl = "upi://pay?pa=" . urlencode($upiId) . "&pn=" . urlencode("GreenH
 $qrImg = $settings['qr_image_path'] ?? '';
 $qrSrc = '';
 if (!empty($qrImg)) {
-    $qrSrc = (str_starts_with($qrImg, 'http')) ? $qrImg : ('../' . ltrim($qrImg, '/'));
+    $qrSrc = (str_starts_with($qrImg, 'http') || str_starts_with($qrImg, 'data:')) ? $qrImg : ('../' . ltrim($qrImg, '/'));
 } else {
     $qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=" . urlencode($upiIntentUrl);
 }

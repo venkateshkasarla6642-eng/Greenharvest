@@ -629,7 +629,12 @@ const PayAdmin = (function() {
     if (s.qr_image_path) {
       const img = document.getElementById('qrPreviewImg');
       const placeholder = document.getElementById('qrPreviewNone');
-      if (img) { img.src = '/' + s.qr_image_path; img.style.display = ''; }
+      if (img) {
+        img.src = (s.qr_image_path.startsWith('data:') || s.qr_image_path.startsWith('http'))
+          ? s.qr_image_path
+          : ('/' + s.qr_image_path.replace(/^\//, ''));
+        img.style.display = 'block';
+      }
       if (placeholder) placeholder.style.display = 'none';
     }
 
@@ -653,6 +658,12 @@ const PayAdmin = (function() {
     e.preventDefault();
     const form = document.getElementById('settingsForm');
     if (!form) return;
+
+    // Auto-upload QR image if a new file was chosen in the file input
+    const qrInput = document.getElementById('qrImageInput');
+    if (qrInput && qrInput.files?.length && !qrInput._uploaded) {
+      await uploadQr();
+    }
 
     // Build enabled_methods string from checkboxes
     const methods = [];
@@ -775,20 +786,25 @@ const PayAdmin = (function() {
     formData.append('_csrf', CSRF);
     formData.append('qr_image', input.files[0]);
 
+    toast('Uploading QR image...', 'info');
     const res = await fetch(API, {
       method: 'POST',
       body: formData,
       credentials: 'same-origin'
     }).then(r => r.json()).catch(e => ({ error: e.message }));
 
-    if (res.success) {
-      toast('QR image uploaded!', 'success');
+    if (res && res.success) {
+      input._uploaded = true;
+      toast('QR image uploaded & active!', 'success');
       const img = document.getElementById('qrPreviewImg');
       const placeholder = document.getElementById('qrPreviewNone');
-      if (img) { img.src = '/' + res.qr_image_path + '?v=' + Date.now(); img.style.display = ''; }
+      if (img) {
+        img.src = res.qr_image_path;
+        img.style.display = 'block';
+      }
       if (placeholder) placeholder.style.display = 'none';
     } else {
-      toast(res.error || 'Upload failed.', 'error');
+      toast(res?.error || 'Upload failed.', 'error');
     }
   }
 
@@ -1233,6 +1249,17 @@ Thank you for shopping with GreenHarvest Fresh Vegetables!`;
     loadDashboard();
     // Auto-refresh dashboard every 60 seconds
     setInterval(loadDashboard, 60000);
+
+    // Auto-upload QR image when file is chosen
+    const qrInput = document.getElementById('qrImageInput');
+    if (qrInput) {
+      qrInput.addEventListener('change', () => {
+        if (qrInput.files?.length) {
+          qrInput._uploaded = false;
+          uploadQr();
+        }
+      });
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);

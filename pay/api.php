@@ -804,33 +804,33 @@ switch ($action) {
         if (!in_array($mime, ['image/jpeg', 'image/png', 'image/webp'])) {
             jsonResponse(['error' => 'QR image must be JPEG, PNG, or WebP.'], 400);
         }
-        if ($file['size'] > 2 * 1024 * 1024) {
-            jsonResponse(['error' => 'QR image must be under 2 MB.'], 400);
+        if ($file['size'] > 5 * 1024 * 1024) {
+            jsonResponse(['error' => 'QR image must be under 5 MB.'], 400);
         }
 
+        $rawBytes = file_get_contents($file['tmp_name']);
+        $base64   = 'data:' . $mime . ';base64,' . base64_encode($rawBytes);
+
+        // Also save to disk if possible
         $ext  = explode('/', $mime)[1];
         $dir  = __DIR__ . '/../uploads/pay_qr/';
         if (!is_dir($dir)) mkdir($dir, 0750, true);
         $name = 'ghpay_qr_' . time() . '.' . $ext;
-        $dest = $dir . $name;
+        @move_uploaded_file($file['tmp_name'], $dir . $name);
 
-        if (!move_uploaded_file($file['tmp_name'], $dest)) {
-            jsonResponse(['error' => 'Failed to save QR image.'], 500);
-        }
-
-        $path = 'uploads/pay_qr/' . $name;
-        $db->prepare("UPDATE gh_pay_settings SET qr_image_path = ? WHERE id = 1")->execute([$path]);
+        // Save base64 data URI permanently to database (survives container restarts!)
+        $db->prepare("UPDATE gh_pay_settings SET qr_image_path = ? WHERE id = 1")->execute([$base64]);
 
         // Sync to shop_settings
         try {
-            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS qr_image_path VARCHAR(255) DEFAULT ''");
-            $db->prepare("UPDATE shop_settings SET qr_image_path = ? WHERE id = 1")->execute([$path]);
+            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS qr_image_path TEXT DEFAULT ''");
+            $db->prepare("UPDATE shop_settings SET qr_image_path = ? WHERE id = 1")->execute([$base64]);
         } catch (\Throwable $e) {}
 
         $auditLogger = new AuditLogger($db);
-        $auditLogger->log('qr_image_uploaded', ['path' => $path], $owner['id'], 'settings', 1);
+        $auditLogger->log('qr_image_uploaded', ['name' => $name], $owner['id'], 'settings', 1);
 
-        jsonResponse(['success' => true, 'qr_image_path' => $path]);
+        jsonResponse(['success' => true, 'qr_image_path' => $base64]);
         break;
 
     /**

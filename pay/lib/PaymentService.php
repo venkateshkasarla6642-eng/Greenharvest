@@ -81,6 +81,14 @@ class PaymentService {
                 CREATE INDEX IF NOT EXISTS idx_gpl_token ON gh_payment_links(link_token);
                 CREATE INDEX IF NOT EXISTS idx_gpl_status ON gh_payment_links(status);
             ");
+            // Ensure qr_image_path column is TEXT to store persistent base64 data URIs
+            try {
+                $this->db->exec("
+                    ALTER TABLE gh_pay_settings ALTER COLUMN qr_image_path TYPE TEXT;
+                    ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS qr_image_path TEXT DEFAULT '';
+                    ALTER TABLE shop_settings ALTER COLUMN qr_image_path TYPE TEXT;
+                ");
+            } catch (\Throwable $e) {}
         } catch (\Throwable $e) {
             error_log('[GHPay] ensureSchema error: ' . $e->getMessage());
         }

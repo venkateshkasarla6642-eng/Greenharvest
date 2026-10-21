@@ -22,6 +22,10 @@ RUN { \
 # Enable Apache modules: rewrite, deflate (gzip compression), headers, expires
 RUN a2enmod rewrite deflate headers expires
 
+# Pass container environment variables to PHP under Apache
+RUN echo 'PassEnv DATABASE_URL DB_HOST DB_USER DB_PASS DB_NAME DB_PORT GH_PAY_MODE GH_LIVE_PROVIDER GH_LIVE_KEY_ID GH_LIVE_KEY_SECRET GH_WEBHOOK_SECRET RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET RAZORPAY_KEY RAZORPAY_SECRET RZP_KEY_ID RZP_KEY_SECRET' > /etc/apache2/conf-available/render-env.conf \
+    && a2enconf render-env
+
 # Set working directory
 WORKDIR /var/www/html
 
