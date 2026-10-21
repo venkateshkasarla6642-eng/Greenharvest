@@ -11,3 +11,12 @@ desktop.ini
 
 # Log files
 *.log
+
+# GreenHarvest Pay — Security: never commit these
+.env
+.env.local
+.env.production
+uploads/pay_qr/
+uploads/profiles/
+# Keep setup script out of prod docker image (delete after use)
+# pay/setup_owner.php — delete after creating owner account

@@ -142,6 +142,77 @@ require_once 'config.php';
 <!-- ═══════════════════════ APP SCRIPT ═══════════════════════ -->
 <script src="assets/js/app.js?v=<?php echo filemtime(__DIR__ . '/assets/js/app.js'); ?>"></script>
 
+<!-- ═══════════ GreenHarvest Pay Customer Widget ═══════════ -->
+<script src="/pay/assets/pay-checkout.js?v=<?php echo @filemtime(__DIR__ . '/pay/assets/pay-checkout.js'); ?>"></script>
+<script>
+  // Hook GreenHarvest Pay into the existing order confirmation flow.
+  // After place_order succeeds, the confirmation modal offers the GHPay sheet.
+  // This never changes the existing place_order API or checkout form behaviour.
+  (function () {
+    'use strict';
+    var _origShowConfirm = null;
+
+    function hookGHPay() {
+      if (!window.App || typeof App.showOrderConfirmation !== 'function') {
+        setTimeout(hookGHPay, 300);
+        return;
+      }
+      _origShowConfirm = App.showOrderConfirmation.bind(App);
+
+      App.showOrderConfirmation = function (res) {
+        // Run the existing confirmation UI first
+        _origShowConfirm(res);
+
+        // After a short delay, append a "Pay Now with GreenHarvest Pay" button
+        // only when payment method is not COD
+        setTimeout(function () {
+          var modalBody = document.getElementById('modalBody');
+          if (!modalBody) return;
+
+          // Determine if GHPay should auto-open (non-COD orders)
+          var method = res.payment_method || 'ScanPay';
+          var isCod  = (method === 'COD' || method === 'Cash on Delivery');
+
+          // Add GHPay button to confirmation modal
+          var ghBtn = document.createElement('button');
+          ghBtn.className = 'btn-primary';
+          ghBtn.style.cssText = 'background:linear-gradient(135deg,#10b981,#059669);width:100%;margin-top:10px;';
+          ghBtn.innerHTML = '💳 Pay with GreenHarvest Pay';
+          ghBtn.onclick = function () {
+            GHPay.openForOrder(
+              res.order_id,
+              res.order_number,
+              res.total_amount,
+              method
+            );
+          };
+
+          var btnWrap = modalBody.querySelector('div[style*="justify-content:center"]');
+          if (btnWrap) {
+            btnWrap.insertAdjacentElement('beforebegin', ghBtn);
+          } else {
+            modalBody.appendChild(ghBtn);
+          }
+
+          // Auto-open for non-COD payments
+          if (!isCod) {
+            setTimeout(function () {
+              GHPay.openForOrder(
+                res.order_id,
+                res.order_number,
+                res.total_amount,
+                method
+              );
+            }, 800);
+          }
+        }, 200);
+      };
+    }
+
+    document.addEventListener('DOMContentLoaded', hookGHPay);
+  })();
+</script>
+
 <style>
   /* Cart drawer overlay sync */
   .cart-drawer.open ~ * #cartOverlay { display: block !important; }

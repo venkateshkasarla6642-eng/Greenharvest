@@ -1422,6 +1422,36 @@ switch ($action) {
         jsonResponse(['success' => true]);
         break;
 
+    case 'delete_notification':
+        // Dismiss a single notification for the authenticated user
+        $authUser = checkAuthUser();
+        $notifId = intval($_POST['id'] ?? 0);
+        if ($notifId <= 0) { jsonResponse(['error' => 'Invalid notification ID'], 400); }
+
+        // Fetch the notification first to verify ownership
+        $stmt = $db->prepare("SELECT * FROM notifications WHERE id = ?");
+        $stmt->execute([$notifId]);
+        $n = $stmt->fetch();
+        if (!$n) { jsonResponse(['error' => 'Notification not found'], 404); }
+
+        // Security: customer can only dismiss their own or null-user_id customer notifications
+        if ($authUser['role'] === 'customer') {
+            if ($n['user_id'] && $n['user_id'] != $authUser['id']) {
+                jsonResponse(['error' => 'Unauthorized'], 403);
+            }
+        } elseif ($authUser['role'] === 'shopkeeper') {
+            // Shopkeeper can only dismiss shopkeeper-role notifications
+            if ($n['for_role'] !== 'shopkeeper' && $n['for_role'] !== 'all') {
+                jsonResponse(['error' => 'Unauthorized'], 403);
+            }
+        }
+
+        // Mark as dismissed and read (soft-delete — never removes orders/payments)
+        $db->prepare("UPDATE notifications SET is_dismissed = 1, is_read = 1 WHERE id = ?")
+           ->execute([$notifId]);
+        jsonResponse(['success' => true]);
+        break;
+
     case 'clear_notifications':
         $authUser = checkAuthUser();
         try { $db->exec("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_dismissed SMALLINT DEFAULT 0"); } catch(Exception $e) {}

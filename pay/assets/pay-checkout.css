@@ -1,0 +1,375 @@
+/* =====================================================================
+   GreenHarvest Pay — Customer Checkout Styles
+   Injected into the main site for the GHPay payment widget
+   ===================================================================== */
+
+/* ── GreenHarvest Pay branded checkout overlay ── */
+.ghpay-checkout-wrap {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.ghpay-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 16px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 18px;
+}
+
+.ghpay-logo-icon {
+  font-size: 22px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.ghpay-brand {
+  flex: 1;
+}
+
+.ghpay-brand-name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+.ghpay-brand-sub {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.ghpay-mode-tag {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 100px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.ghpay-mode-sandbox { background: #e0f2fe; color: #0369a1; }
+.ghpay-mode-live    { background: #fef2f2; color: #dc2626; }
+
+/* ── Amount summary ── */
+.ghpay-amount-box {
+  background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.ghpay-amount-label {
+  font-size: 12px;
+  color: #16a34a;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ghpay-amount-value {
+  font-size: 22px;
+  font-weight: 900;
+  color: #15803d;
+}
+
+/* ── Method selector ── */
+.ghpay-methods {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.ghpay-method-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: #fff;
+}
+
+.ghpay-method-opt:hover {
+  border-color: #10b981;
+  background: #f0fdf4;
+}
+
+.ghpay-method-opt.selected {
+  border-color: #10b981;
+  background: #f0fdf4;
+  box-shadow: 0 0 0 2px rgba(16,185,129,0.15);
+}
+
+.ghpay-method-opt input[type="radio"] {
+  accent-color: #10b981;
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+}
+
+.ghpay-method-icon {
+  font-size: 20px;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ghpay-method-label {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.ghpay-method-sub {
+  font-size: 11.5px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+/* ── QR Payment Section ── */
+.ghpay-qr-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.ghpay-qr-section h4 {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.ghpay-qr-img {
+  width: 175px;
+  height: 175px;
+  border-radius: 10px;
+  border: 2px solid #bbf7d0;
+  margin: 10px auto;
+  display: block;
+}
+
+.ghpay-upi-id {
+  font-size: 13px;
+  font-weight: 800;
+  color: #15803d;
+  margin-bottom: 2px;
+}
+
+.ghpay-upi-amount {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 14px;
+}
+
+.ghpay-utr-input-wrap label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 6px;
+  text-align: left;
+}
+
+.ghpay-utr-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: 'Courier New', monospace;
+  outline: none;
+  transition: border-color 0.15s;
+  color: #0f172a;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.ghpay-utr-input:focus {
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16,185,129,0.12);
+}
+
+.ghpay-screenshot-wrap {
+  margin-top: 12px;
+  text-align: left;
+}
+
+.ghpay-screenshot-wrap label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 6px;
+}
+
+.ghpay-screenshot-wrap input[type="file"] {
+  display: block;
+  font-size: 12px;
+  color: #475569;
+}
+
+/* ── Sandbox simulator (testing only) ── */
+.ghpay-sandbox-panel {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.ghpay-sandbox-title {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0369a1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+
+.ghpay-sandbox-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ghpay-sim-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid;
+  transition: all 0.15s;
+}
+
+.ghpay-sim-success { background: #f0fdf4; border-color: #10b981; color: #15803d; }
+.ghpay-sim-fail    { background: #fef2f2; border-color: #ef4444; color: #dc2626; }
+.ghpay-sim-pending { background: #fffbeb; border-color: #f59e0b; color: #92400e; }
+.ghpay-sim-cancel  { background: #f8fafc; border-color: #94a3b8; color: #475569; }
+
+.ghpay-sim-btn:hover { filter: brightness(0.95); transform: translateY(-1px); }
+
+/* ── COD section ── */
+.ghpay-cod-note {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #92400e;
+  margin-bottom: 18px;
+  line-height: 1.6;
+}
+
+/* ── Status display ── */
+.ghpay-status-wrap {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.ghpay-status-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.ghpay-status-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  margin-bottom: 6px;
+}
+
+.ghpay-status-sub {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.ghpay-ref-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #6366f1;
+  word-break: break-all;
+  margin-bottom: 16px;
+}
+
+/* ── Pay button ── */
+.ghpay-pay-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: inherit;
+}
+
+.ghpay-pay-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(16,185,129,0.3);
+}
+
+.ghpay-pay-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.ghpay-pay-btn.loading::after {
+  content: '';
+  width: 16px; height: 16px;
+  border: 2px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ghpaySpinBtn 0.7s linear infinite;
+  margin-left: 6px;
+}
+
+@keyframes ghpaySpinBtn {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Security notice ── */
+.ghpay-secure-note {
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}

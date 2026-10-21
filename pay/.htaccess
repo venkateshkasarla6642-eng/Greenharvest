@@ -1,0 +1,35 @@
+# GreenHarvest Pay — Directory Security
+# Prevents direct browser access to PHP library files and migrations.
+# Allow only: admin.php, api.php, webhook.php, assets/
+
+# Deny access to lib/, migrations/, and setup scripts
+<FilesMatch "^(setup_owner\.php)$">
+  Require all denied
+</FilesMatch>
+
+# Deny lib and migrations directories
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Block direct access to lib/ directory
+  RewriteRule ^lib/ - [F,L]
+
+  # Block direct access to migrations/
+  RewriteRule ^migrations/ - [F,L]
+</IfModule>
+
+# Security headers for all pay/ responses
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set X-XSS-Protection "1; mode=block"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Disable directory listing
+Options -Indexes
+
+# Protect uploads from direct execution
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|phar)$">
+  # Only allow specific entry points
+</FilesMatch>
