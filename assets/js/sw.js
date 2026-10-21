@@ -1,7 +1,7 @@
-// assets/js/sw.js — GreenHarvest PWA Service Worker v3
+// assets/js/sw.js — GreenHarvest PWA Service Worker v4
 // High-performance Stale-While-Revalidate for static assets; never caches private/auth/API data.
 
-const CACHE_NAME = 'gh-shell-v3';
+const CACHE_NAME = 'gh-shell-v4';
 
 // Static assets to pre-cache (app shell)
 const SHELL_ASSETS = [

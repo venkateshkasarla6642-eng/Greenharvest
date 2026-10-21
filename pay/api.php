@@ -139,7 +139,7 @@ switch ($action) {
             jsonResponse(['error' => 'Invalid payment method.'], 400);
         }
 
-        $result = $payService->initiatePayment($orderId, $u['id'], $method, $idempotencyKey);
+        $result = $payService->initiatePayment($orderId, $u['id'], $method, $idempotencyKey, $u['role'] ?? '');
         jsonResponse($result, $result['success'] ? 200 : 400);
         break;
 
@@ -652,7 +652,7 @@ switch ($action) {
         }
 
         $result = $payService->verifyPayment((int)$attempt['id'], (int)$u['id'], $outcome);
-        jsonResponse(array_merge($result, ['simulated' => true, 'outcome' => $outcome]));
+        jsonResponse(array_merge($result, ['simulated' => true, 'outcome' => $outcome]), $result['success'] ? 200 : 400);
         break;
 
     default:

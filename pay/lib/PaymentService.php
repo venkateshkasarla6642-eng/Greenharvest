@@ -161,7 +161,8 @@ class PaymentService {
         int    $orderId,
         int    $customerId,
         string $method,
-        string $idempotencyKey
+        string $idempotencyKey,
+        string $userRole = ''
     ): array {
 
         // --- Validate idempotency key (prevent double-submission) ---
@@ -202,7 +203,8 @@ class PaymentService {
                 $this->db->rollBack();
                 return ['success' => false, 'error' => 'Order not found.'];
             }
-            if ((int)$order['customer_id'] !== $customerId) {
+            $isStaff = in_array($userRole, ['owner', 'shopkeeper'], true);
+            if (!$isStaff && (int)$order['customer_id'] !== $customerId) {
                 $this->db->rollBack();
                 return ['success' => false, 'error' => 'Unauthorized order access.'];
             }
@@ -212,7 +214,14 @@ class PaymentService {
             }
             if ($order['payment_status'] === 'Paid') {
                 $this->db->rollBack();
-                return ['success' => false, 'error' => 'This order has already been paid.'];
+                // Return idempotent success if order is already marked Paid
+                return [
+                    'success'      => true,
+                    'already_paid' => true,
+                    'payment_ref'  => !empty($order['upi_trans_id']) ? $order['upi_trans_id'] : ('GHP-PAID-' . $orderId),
+                    'status'       => 'paid',
+                    'amount'       => (float)$order['total_amount']
+                ];
             }
 
             // Check for non-terminal pending/processing attempt for this order
@@ -350,6 +359,18 @@ class PaymentService {
             if (!$attempt) {
                 $this->db->rollBack();
                 return ['success' => false, 'error' => 'Payment attempt not found.'];
+            }
+
+            // Return idempotent success if attempt is already in the requested terminal state
+            if ($attempt['status'] === $outcome || ($attempt['status'] === 'paid' && $outcome === 'paid')) {
+                $this->db->rollBack();
+                return [
+                    'success'          => true,
+                    'already_verified' => true,
+                    'status'           => $attempt['status'],
+                    'payment_ref'      => $attempt['payment_ref'],
+                    'order_id'         => $attempt['order_id']
+                ];
             }
 
             // Validate state transition

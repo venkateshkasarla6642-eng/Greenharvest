@@ -16,34 +16,56 @@
 
 const GHPay = (function () {
 
-  // Detect base URL dynamically (e.g., '' or '/market')
-  const BASE_PATH = (function () {
-    const scripts = document.getElementsByTagName('script');
-    for (let i = 0; i < scripts.length; i++) {
-      const src = scripts[i].src || '';
-      if (src.indexOf('/pay/assets/pay-checkout.js') !== -1 || src.indexOf('pay/assets/pay-checkout.js') !== -1) {
-        try {
-          const u = new URL(src, window.location.href);
-          const p = u.pathname.replace(/\/pay\/assets\/pay-checkout\.js.*$/, '');
-          return p;
-        } catch (e) {
-          return '';
+  // ── Dynamic API URL & Base Path Resolution ─────────────────────────────────
+  const API_URL = (function () {
+    // 1. Check document.currentScript (standard modern browsers)
+    if (typeof document !== 'undefined' && document.currentScript && document.currentScript.src) {
+      try {
+        return new URL('../api.php', document.currentScript.src).href;
+      } catch (e) {}
+    }
+    // 2. Scan script tags for pay-checkout.js
+    if (typeof document !== 'undefined') {
+      const scripts = document.getElementsByTagName('script');
+      for (let i = 0; i < scripts.length; i++) {
+        const src = scripts[i].src || scripts[i].getAttribute('src') || '';
+        if (src.indexOf('pay/assets/pay-checkout.js') !== -1) {
+          try {
+            return new URL('../api.php', scripts[i].src).href;
+          } catch (e) {}
         }
       }
     }
-    return '';
+    // 3. Fallback relative to origin / pathname
+    try {
+      const origin = window.location.origin;
+      const path = window.location.pathname.replace(/\/[^\/]*$/, '');
+      return origin + (path ? path : '') + '/pay/api.php';
+    } catch (e) {
+      return 'pay/api.php';
+    }
   })();
 
-  const API_URL = (BASE_PATH ? BASE_PATH : '') + '/pay/api.php';
+  const BASE_URL = (function () {
+    try {
+      return API_URL.replace(/\/pay\/api\.php.*$/, '');
+    } catch (e) {
+      return '';
+    }
+  })();
+  const BASE_PATH = BASE_URL;
+
   let _csrfToken = null;
   let _cachedSettings = null;
 
-  function _timeoutSignal(ms = 15000) {
+  function _timeoutSignal(ms = 45000) {
     if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
       return AbortSignal.timeout(ms);
     }
     const ctrl = new AbortController();
-    setTimeout(() => ctrl.abort(), ms);
+    setTimeout(() => {
+      try { ctrl.abort(); } catch (e) {}
+    }, ms);
     return ctrl.signal;
   }
 
@@ -52,10 +74,16 @@ const GHPay = (function () {
   async function ensureCsrf() {
     if (_csrfToken) return _csrfToken;
     try {
-      const r = await fetch(API_URL + '?action=get_csrf_token', { credentials: 'same-origin', signal: _timeoutSignal(10000) });
-      const d = await r.json();
-      _csrfToken = d.csrf_token || '';
+      const r = await fetch(API_URL + '?action=get_csrf_token', {
+        credentials: 'same-origin',
+        signal: _timeoutSignal(30000)
+      });
+      if (r.ok) {
+        const d = await r.json();
+        _csrfToken = d.csrf_token || '';
+      }
     } catch (e) {
+      console.warn('[GHPay] get_csrf_token error:', e);
       _csrfToken = '';
     }
     return _csrfToken;
@@ -64,27 +92,71 @@ const GHPay = (function () {
   // ── API helpers ────────────────────────────────────────────────────────────
 
   async function payPost(action, data = {}) {
-    const csrf = await ensureCsrf();
+    let csrf = '';
+    try {
+      csrf = await ensureCsrf();
+    } catch (e) {
+      console.warn('[GHPay] ensureCsrf notice:', e);
+    }
+
     const form = new FormData();
     form.append('action', action);
-    form.append('_csrf', csrf);
+    if (csrf) form.append('_csrf', csrf);
     for (const [k, v] of Object.entries(data)) form.append(k, v);
 
     try {
-      const r = await fetch(API_URL, { method: 'POST', body: form, credentials: 'same-origin', signal: _timeoutSignal(15000) });
-      return await r.json();
+      const r = await fetch(API_URL, {
+        method: 'POST',
+        body: form,
+        credentials: 'same-origin',
+        signal: _timeoutSignal(45000)
+      });
+
+      const text = await r.text();
+      let d = null;
+      try {
+        d = JSON.parse(text);
+      } catch (jsonErr) {
+        console.error('[GHPay] Non-JSON response for action:', action, 'status:', r.status, text.slice(0, 300));
+        return {
+          success: false,
+          error: r.ok
+            ? 'Invalid response format from server.'
+            : `Server returned HTTP ${r.status}. Please try again.`
+        };
+      }
+
+      if (!r.ok && (!d || !d.error)) {
+        return { success: false, error: `Request failed with HTTP status ${r.status}.` };
+      }
+
+      return d;
     } catch (e) {
-      return { error: 'Network error. Please check your connection.' };
+      console.error('[GHPay] payPost error for action:', action, e);
+      if (e.name === 'AbortError') {
+        return { success: false, error: 'Request timed out. Please check your connection and retry.' };
+      }
+      return { success: false, error: 'Network error. Please check your connection.' };
     }
   }
 
   async function payGet(action, params = {}) {
     const url = API_URL + '?' + new URLSearchParams({ action, ...params }).toString();
     try {
-      const r = await fetch(url, { credentials: 'same-origin', signal: _timeoutSignal(15000) });
-      return await r.json();
+      const r = await fetch(url, {
+        credentials: 'same-origin',
+        signal: _timeoutSignal(30000)
+      });
+      const text = await r.text();
+      try {
+        return JSON.parse(text);
+      } catch (jsonErr) {
+        console.error('[GHPay] Non-JSON GET response for action:', action, 'status:', r.status, text.slice(0, 300));
+        return { success: false, error: `Server HTTP ${r.status}` };
+      }
     } catch (e) {
-      return { error: 'Network error.' };
+      console.error('[GHPay] payGet error for action:', action, e);
+      return { success: false, error: 'Network error.' };
     }
   }
 
@@ -103,15 +175,20 @@ const GHPay = (function () {
   async function loadPaySettings(force = false) {
     if (_cachedSettings && !force) return _cachedSettings;
     try {
-      const r = await fetch(API_URL + '?action=get_public_settings', { credentials: 'same-origin' });
-      const d = await r.json();
-      if (d && d.success) {
-        _cachedSettings = d;
-        if (d.csrf_token) _csrfToken = d.csrf_token;
-        return d;
+      const r = await fetch(API_URL + '?action=get_public_settings', {
+        credentials: 'same-origin',
+        signal: _timeoutSignal(30000)
+      });
+      if (r.ok) {
+        const d = await r.json();
+        if (d && d.success) {
+          _cachedSettings = d;
+          if (d.csrf_token) _csrfToken = d.csrf_token;
+          return d;
+        }
       }
     } catch (e) {
-      // Fallback defaults
+      console.warn('[GHPay] loadPaySettings notice:', e);
     }
     _cachedSettings = {
       success: true,
@@ -518,6 +595,26 @@ const GHPay = (function () {
     const s = window._ghpayState;
     if (!s) return;
 
+    // Visual feedback: briefly disable simulation buttons during request
+    const simBtns = document.querySelectorAll('.ghpay-sim-btn');
+    simBtns.forEach(btn => {
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btn.style.pointerEvents = 'none';
+    });
+
+    const resetBtns = () => {
+      simBtns.forEach(btn => {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+      });
+    };
+
+    // Remove any previous error banner
+    const prevErr = document.getElementById('ghpayError');
+    if (prevErr) prevErr.remove();
+
     // Initiate attempt first if not yet initiated
     if (!s.paymentRef) {
       const idempotencyKey = genIdempotencyKey(s.orderId);
@@ -526,8 +623,9 @@ const GHPay = (function () {
         method: 'sandbox',
         idempotency_key: idempotencyKey
       });
-      if (!r.success) {
-        _showError(r.error || 'Failed to initiate sandbox payment.');
+      if (!r || !r.success) {
+        resetBtns();
+        _showError(r?.error || 'Failed to initiate sandbox payment.');
         return;
       }
       s.paymentRef = r.payment_ref;
@@ -539,6 +637,12 @@ const GHPay = (function () {
       payment_ref: s.paymentRef,
       outcome
     });
+
+    if (!res || !res.success) {
+      resetBtns();
+      _showError(res?.error || 'Failed to simulate payment outcome.');
+      return;
+    }
 
     if (outcome === 'paid') {
       _showSuccess(s.paymentRef, 'Payment verified successfully via GreenHarvest Pay Sandbox!');
@@ -688,11 +792,14 @@ const GHPay = (function () {
 
     const errDiv = document.createElement('div');
     errDiv.id = 'ghpayError';
-    errDiv.style.cssText = 'background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:10px 14px;color:#dc2626;font-size:13px;margin-bottom:12px;font-weight:600;';
+    errDiv.style.cssText = 'background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:11px 14px;color:#dc2626;font-size:13px;margin:10px 0;font-weight:700;line-height:1.4;box-shadow:0 2px 8px rgba(220,38,38,0.08);';
     errDiv.textContent = '⚠️ ' + message;
 
+    const content = document.getElementById('ghpayContent');
     const payBtn = document.getElementById('ghpayPayBtn');
-    if (payBtn) {
+    if (content) {
+      content.insertAdjacentElement('afterbegin', errDiv);
+    } else if (payBtn) {
       payBtn.insertAdjacentElement('beforebegin', errDiv);
     } else {
       const wrap = document.getElementById('ghpayWrap');
