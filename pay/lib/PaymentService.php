@@ -34,12 +34,12 @@ class PaymentService {
     ];
 
     public function __construct(PDO $db) {
-        $this->db      = $db;
-        $this->audit   = new AuditLogger($db);
-        $this->sandbox = new SandboxAdapter();
-        $this->live    = new LiveAdapter();
+        $this->db       = $db;
+        $this->audit    = new AuditLogger($db);
+        $this->sandbox  = new SandboxAdapter();
         $this->ensureSchema();
         $this->settings = $this->loadSettings();
+        $this->live     = new LiveAdapter($this->settings);
     }
 
     // ─── Auto-migration ──────────────────────────────────────────────────────
@@ -152,12 +152,18 @@ class PaymentService {
         return $this->settings;
     }
 
+    public function getLiveAdapter(): LiveAdapter {
+        return $this->live;
+    }
+
     public function getPublicSettings(): array {
         $s = $this->settings;
         $isLive = $this->isLiveMode();
-        $provider = $s['live_provider'] ?? 'none';
-        $keyEnv = $s['provider_key_env'] ?? 'GH_LIVE_KEY_ID';
-        $hasLiveKeys = !empty($keyEnv) && !empty(getenv($keyEnv));
+        $provider = $this->live->getProviderName();
+        if ($provider === 'none' && !empty($s['live_provider'])) {
+            $provider = $s['live_provider'];
+        }
+        $hasLiveKeys = $this->live->isConfigured();
 
         return [
             'success'               => true,
@@ -167,6 +173,8 @@ class PaymentService {
             'enabled_methods'       => $s['enabled_methods'] ?? 'qr_upi,cod,sandbox',
             'live_provider'         => $provider,
             'has_live_keys'         => $hasLiveKeys,
+            'live_key_id'           => $hasLiveKeys ? $this->live->getKeyId() : '',
+            'is_test_key'           => $this->live->isTestMode(),
             'upi_id'                => $s['upi_id'] ?? '',
             'qr_image_path'         => $s['qr_image_path'] ?? '',
             'sandbox_auto_approve'  => (bool)($s['sandbox_auto_approve'] ?? 0)
@@ -331,7 +339,7 @@ class PaymentService {
                 'amount'      => (float)$order['total_amount'],
                 'order_id'    => $orderId
             ]);
-        } elseif ($this->isLiveMode() && str_starts_with($method, 'live_')) {
+        } elseif (str_starts_with($method, 'live_') && $this->live->isConfigured()) {
             $providerResult = $this->live->initiatePayment(
                 (float)$order['total_amount'],
                 $paymentRef

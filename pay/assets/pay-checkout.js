@@ -672,10 +672,24 @@ const GHPay = (function () {
 
   // ── Razorpay live checkout ────────────────────────────────────────────────
 
-  function _openRazorpay(providerData, state, paymentRef) {
+  async function _ensureRazorpay() {
+    if (typeof window !== 'undefined' && window.Razorpay) return true;
+    return new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+  }
+
+  async function _openRazorpay(providerData, state, paymentRef) {
     if (!window.Razorpay) {
-      _showError('Razorpay checkout SDK not loaded. Please refresh and try again.');
-      return;
+      const ok = await _ensureRazorpay();
+      if (!ok || !window.Razorpay) {
+        _showError('Razorpay checkout SDK could not be loaded. Please check your internet connection and try again.');
+        return;
+      }
     }
 
     const options = {

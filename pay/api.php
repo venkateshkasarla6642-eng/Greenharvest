@@ -628,15 +628,28 @@ switch ($action) {
     case 'owner_get_settings':
         payRequireOwner();
         $settings = $payService->getSettings();
+        $live = $payService->getLiveAdapter();
+        $keyId = $live->getKeyId();
+        $hasLiveKeys = $live->isConfigured();
+        $keyPreview = '';
+        if (!empty($keyId)) {
+            $keyPreview = strlen($keyId) > 12
+                ? (substr($keyId, 0, 8) . '...' . substr($keyId, -4))
+                : $keyId;
+        }
+
         // Never expose secrets — return only non-sensitive fields
         $safe = [
             'id'                   => $settings['id'] ?? 1,
             'mode'                 => $settings['mode'] ?? 'sandbox',
             'enabled_methods'      => $settings['enabled_methods'] ?? 'qr_upi,cod',
-            'live_provider'        => $settings['live_provider'] ?? 'none',
+            'live_provider'        => $live->getProviderName() !== 'none' ? $live->getProviderName() : ($settings['live_provider'] ?? 'none'),
             'provider_key_env'     => $settings['provider_key_env'] ?? '',
             'provider_secret_env'  => $settings['provider_secret_env'] ?? '',
             'webhook_secret_env'   => $settings['webhook_secret_env'] ?? '',
+            'has_live_keys'        => $hasLiveKeys,
+            'key_id_preview'       => $keyPreview,
+            'is_test_key'          => $live->isTestMode(),
             'upi_id'               => $settings['upi_id'] ?? '',
             'qr_image_path'        => $settings['qr_image_path'] ?? '',
             'manual_verify_enabled'=> (int)($settings['manual_verify_enabled'] ?? 1),

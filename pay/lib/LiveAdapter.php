@@ -20,24 +20,118 @@ class LiveAdapter {
     private string $keyId;
     private string $keySecret;
     private string $webhookSecret;
+    private array  $settings;
 
-    public function __construct() {
-        $this->provider      = getenv('GH_LIVE_PROVIDER')  ?: 'none';
-        $this->keyId         = getenv('GH_LIVE_KEY_ID')    ?: '';
-        $this->keySecret     = getenv('GH_LIVE_KEY_SECRET') ?: '';
-        $this->webhookSecret = getenv('GH_WEBHOOK_SECRET')  ?: '';
+    public function __construct(array $settings = []) {
+        $this->settings = $settings;
+        $this->resolveCredentials();
     }
 
-    /** Check if live provider is properly configured. */
+    /**
+     * Smart credentials resolver:
+     * Supports BOTH direct API keys entered in admin settings AND Render environment variable names.
+     */
+    private function resolveCredentials(): void {
+        // 1. Resolve Key ID
+        $rawKey = trim($this->settings['provider_key_env'] ?? '');
+        $resolvedKey = '';
+        if (!empty($rawKey)) {
+            if (getenv($rawKey)) {
+                $resolvedKey = getenv($rawKey);
+            } else {
+                $resolvedKey = $rawKey; // Direct key string (e.g. rzp_test_... or rzp_live_...)
+            }
+        }
+        if (empty($resolvedKey)) {
+            $resolvedKey = getenv('GH_LIVE_KEY_ID')
+                ?: getenv('RAZORPAY_KEY_ID')
+                ?: getenv('RAZORPAY_KEY')
+                ?: getenv('RZP_KEY_ID')
+                ?: getenv('RZP_TEST_KEY_ID')
+                ?: getenv('KEY_ID')
+                ?: '';
+        }
+        $this->keyId = $resolvedKey;
+
+        // 2. Resolve Key Secret
+        $rawSecret = trim($this->settings['provider_secret_env'] ?? '');
+        $resolvedSecret = '';
+        if (!empty($rawSecret)) {
+            if (getenv($rawSecret)) {
+                $resolvedSecret = getenv($rawSecret);
+            } else {
+                $resolvedSecret = $rawSecret;
+            }
+        }
+        if (empty($resolvedSecret)) {
+            $resolvedSecret = getenv('GH_LIVE_KEY_SECRET')
+                ?: getenv('RAZORPAY_KEY_SECRET')
+                ?: getenv('RAZORPAY_SECRET')
+                ?: getenv('RZP_KEY_SECRET')
+                ?: getenv('RZP_TEST_KEY_SECRET')
+                ?: getenv('KEY_SECRET')
+                ?: '';
+        }
+        $this->keySecret = $resolvedSecret;
+
+        // 3. Resolve Webhook Secret
+        $rawWebhook = trim($this->settings['webhook_secret_env'] ?? '');
+        $resolvedWebhook = '';
+        if (!empty($rawWebhook)) {
+            if (getenv($rawWebhook)) {
+                $resolvedWebhook = getenv($rawWebhook);
+            } else {
+                $resolvedWebhook = $rawWebhook;
+            }
+        }
+        if (empty($resolvedWebhook)) {
+            $resolvedWebhook = getenv('GH_WEBHOOK_SECRET')
+                ?: getenv('RAZORPAY_WEBHOOK_SECRET')
+                ?: getenv('WEBHOOK_SECRET')
+                ?: '';
+        }
+        $this->webhookSecret = $resolvedWebhook;
+
+        // 4. Resolve Provider Name
+        $prov = trim($this->settings['live_provider'] ?? '');
+        if (empty($prov) || $prov === 'none') {
+            $prov = getenv('GH_LIVE_PROVIDER') ?: '';
+        }
+        if (empty($prov) || $prov === 'none') {
+            if (str_starts_with($this->keyId, 'rzp_')) {
+                $prov = 'razorpay';
+            } else {
+                $prov = 'none';
+            }
+        }
+        $this->provider = strtolower($prov);
+    }
+
+    /** Check if live provider is properly configured (requires provider, keyId, keySecret). */
     public function isConfigured(): bool {
         return $this->provider !== 'none'
             && !empty($this->keyId)
-            && !empty($this->keySecret)
-            && !empty($this->webhookSecret);
+            && !empty($this->keySecret);
     }
 
     public function getProviderName(): string {
         return $this->provider;
+    }
+
+    public function getKeyId(): string {
+        return $this->keyId;
+    }
+
+    public function getKeySecret(): string {
+        return $this->keySecret;
+    }
+
+    public function getWebhookSecret(): string {
+        return $this->webhookSecret;
+    }
+
+    public function isTestMode(): bool {
+        return str_starts_with($this->keyId, 'rzp_test_');
     }
 
     /**

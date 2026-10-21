@@ -474,21 +474,24 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
         </div>
 
         <div id="liveProviderFields" style="display:none;">
-          <div class="pay-alert pay-alert-warning">
-            ⚠️ Credentials reference the <strong>name</strong> of the environment variable on Render, not the value itself.
-            Never enter actual API keys in this form — they are read from Render env vars at runtime.
+          <!-- Credentials Status Indicator -->
+          <div id="credentialsStatusBanner" style="display:none;margin-bottom:14px;border-radius:10px;padding:12px 14px;font-size:13px;"></div>
+
+          <div class="pay-alert pay-alert-warning" style="background:rgba(245,158,11,0.1);border:1px solid #f59e0b;color:#d97706;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;">
+            💡 <strong>API Credentials Guide:</strong><br>
+            You can enter your <strong>Razorpay Key ID &amp; Key Secret</strong> directly below (e.g. <code>rzp_test_...</code>), OR enter the name of your Render environment variables (e.g. <code>GH_LIVE_KEY_ID</code> or <code>RAZORPAY_KEY_ID</code>). Both are fully supported and automatically detected.
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Key ID — Render env var name</label>
-            <input type="text" name="provider_key_env" id="providerKeyEnv" class="pay-input" placeholder="e.g. GH_LIVE_KEY_ID">
+            <label class="pay-label">Key ID (e.g. rzp_test_... or Render env var name)</label>
+            <input type="text" name="provider_key_env" id="providerKeyEnv" class="pay-input" placeholder="e.g. rzp_test_... or GH_LIVE_KEY_ID">
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Key Secret — Render env var name</label>
-            <input type="text" name="provider_secret_env" id="providerSecretEnv" class="pay-input" placeholder="e.g. GH_LIVE_KEY_SECRET">
+            <label class="pay-label">Key Secret (API secret or Render env var name)</label>
+            <input type="password" name="provider_secret_env" id="providerSecretEnv" class="pay-input" placeholder="e.g. your_secret or GH_LIVE_KEY_SECRET">
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Webhook Secret — Render env var name</label>
-            <input type="text" name="webhook_secret_env" id="webhookSecretEnv" class="pay-input" placeholder="e.g. GH_WEBHOOK_SECRET">
+            <label class="pay-label">Webhook Secret (Optional — for webhooks)</label>
+            <input type="text" name="webhook_secret_env" id="webhookSecretEnv" class="pay-input" placeholder="e.g. your_webhook_secret or GH_WEBHOOK_SECRET">
           </div>
         </div>
 

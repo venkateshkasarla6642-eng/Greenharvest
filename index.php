@@ -172,7 +172,8 @@ if ($ghMapsKey === 'YOUR_GOOGLE_MAPS_API_KEY') {
 <!-- ═══════════════════════ APP SCRIPT ═══════════════════════ -->
 <script src="assets/js/app.js?v=<?php echo filemtime(__DIR__ . '/assets/js/app.js'); ?>"></script>
 
-<!-- ═══════════ GreenHarvest Pay Customer Widget ═══════════ -->
+<!-- ═══════════ Razorpay & GreenHarvest Pay Customer Widget ═══════════ -->
+<script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
 <script src="pay/assets/pay-checkout.js?v=<?php echo @filemtime(__DIR__ . '/pay/assets/pay-checkout.js'); ?>"></script>
 
 <style>

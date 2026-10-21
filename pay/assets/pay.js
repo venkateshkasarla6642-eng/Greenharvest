@@ -593,6 +593,32 @@ const PayAdmin = (function() {
     setVal('webhookSecretEnv',  s.webhook_secret_env);
     setVal('settingsUpiId',     s.upi_id);
 
+    // Credentials status banner
+    const statusBanner = document.getElementById('credentialsStatusBanner');
+    if (statusBanner) {
+      if (s.has_live_keys) {
+        statusBanner.style.display = 'flex';
+        statusBanner.style.background = '#ecfdf5';
+        statusBanner.style.border = '1.5px solid #a7f3d0';
+        statusBanner.style.color = '#065f46';
+        statusBanner.style.alignItems = 'center';
+        statusBanner.style.gap = '10px';
+        statusBanner.innerHTML = `
+          <div style="font-size:24px;">✅</div>
+          <div>
+            <div style="font-weight:800;font-size:14px;">Razorpay Connected &amp; Active!</div>
+            <div style="font-size:12px;opacity:0.9;margin-top:2px;">
+              Key: <code>${s.key_id_preview || 'Configured'}</code> &bull;
+              Mode: <strong style="color:${s.is_test_key ? '#2563eb' : '#16a34a'};">${s.is_test_key ? '🧪 Test Mode (rzp_test)' : '🟢 Live Production'}</strong> &bull;
+              Ready to process customer orders.
+            </div>
+          </div>
+        `;
+      } else {
+        statusBanner.style.display = 'none';
+      }
+    }
+
     // Checkboxes
     const mvEl = document.getElementById('manualVerify');
     if (mvEl) mvEl.checked = !!parseInt(s.manual_verify_enabled);
