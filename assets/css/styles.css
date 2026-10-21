@@ -1290,6 +1290,22 @@ img { display: block; max-width: 100%; height: auto; }
 .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 
 /* ─── BUTTONS ────────────────────────────────── */
+button,
+a,
+input[type="button"],
+input[type="submit"],
+.btn-primary,
+.btn-cart,
+.qty-btn,
+.os-btn,
+.role-btn,
+.filter-chip,
+.cat-card,
+.uchip {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .btn-primary {
   display: inline-flex;
   align-items: center;

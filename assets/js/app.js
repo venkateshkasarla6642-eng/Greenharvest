@@ -27,14 +27,24 @@ const App = (() => {
   // ───────────────────────────────────────────────
   // UTILS
   // ───────────────────────────────────────────────
+  function _createTimeoutSignal(ms = 15000) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), ms);
+    return ctrl.signal;
+  }
+
   async function api(action, params = {}, method = 'GET') {
     try {
       let url = `api.php?action=${action}`;
-      let opts = {};
+      let opts = { signal: _createTimeoutSignal(15000) };
       if (method === 'POST') {
         const fd = new FormData();
         for (const [k, v] of Object.entries(params)) fd.append(k, v);
-        opts = { method: 'POST', body: fd };
+        opts.method = 'POST';
+        opts.body = fd;
       } else if (Object.keys(params).length) {
         url += '&' + new URLSearchParams(params).toString();
       }
@@ -51,7 +61,8 @@ const App = (() => {
       const r = await fetch(`api.php?action=${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: _createTimeoutSignal(15000)
       });
       return await r.json();
     } catch (e) {
@@ -2775,6 +2786,35 @@ const App = (() => {
     `).join('');
   }
 
+  function updateCardActions(pid, selUnit) {
+    const p = (window._allProducts || []).find(x => x.id == pid);
+    if (!p) return;
+    const unit = selUnit || state.selectedProductUnits[pid] || (p.available_units || '1kg').split(',')[0].trim();
+    const isOut = p.available_stock <= 0;
+    const inCart = state.cart.find(c => c.product_id === p.id && c.unit_weight === unit);
+
+    const actionWrap = qs(`#cardActions_${p.id}`);
+    if (actionWrap) {
+      if (isOut) {
+        actionWrap.innerHTML = '<button class="btn-cart" disabled>Out of Stock</button>';
+      } else if (inCart) {
+        actionWrap.innerHTML = `
+          <div class="qty-ctrl">
+            <button class="qty-btn" onclick="App.cartChg(${p.id},'${escapeHtml(unit)}',-1)">−</button>
+            <span class="qty-num">${inCart.quantity}</span>
+            <button class="qty-btn" onclick="App.cartChg(${p.id},'${escapeHtml(unit)}',1)">+</button>
+          </div>
+        `;
+      } else {
+        actionWrap.innerHTML = `
+          <button class="btn-cart" onclick="App.addCard(${p.id},event)">
+            <span>+ Add to Cart</span>
+          </button>
+        `;
+      }
+    }
+  }
+
   async function loadProducts() {
     const grid = qs('#productGrid');
     const countEl = qs('#prodCount');
@@ -2833,7 +2873,7 @@ const App = (() => {
               `).join('')}
             </div>
 
-            <div class="card-actions">
+            <div class="card-actions" id="cardActions_${p.id}">
               ${isOut
                 ? '<button class="btn-cart" disabled>Out of Stock</button>'
                 : inCart
@@ -3400,20 +3440,41 @@ const App = (() => {
     }
   }
 
-  async function setOrderStatus(orderId, status, reason = '') {
-    const res = await api('update_order_status', { order_id: orderId, status, reason }, 'POST');
-    if (res.success) {
-      toast(`\u2705 Order ${status}!`);
-      // Auto-stop GPS sharing when order is no longer OutForDelivery
-      if (['Delivered', 'Rejected', 'Cancelled'].includes(status)) {
-        _stopShopkeeperGPS();
-        api('stop_delivery_tracking', { order_id: orderId }, 'POST').catch(() => {});
+  const _orderUpdating = new Set();
+  async function setOrderStatus(orderId, status, reason = '', btn = null) {
+    if (!btn && typeof window !== 'undefined' && window.event && window.event.target) {
+      btn = window.event.target.closest('button');
+    }
+    if (_orderUpdating.has(orderId)) return;
+    _orderUpdating.add(orderId);
+
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.prevHtml = btn.innerHTML;
+      btn.innerHTML = '⏳ Updating...';
+    }
+
+    try {
+      const res = await api('update_order_status', { order_id: orderId, status, reason }, 'POST');
+      if (res && res.success) {
+        toast(`\u2705 Order ${status}!`);
+        if (['Delivered', 'Rejected', 'Cancelled'].includes(status)) {
+          _stopShopkeeperGPS();
+          api('stop_delivery_tracking', { order_id: orderId }, 'POST').catch(() => {});
+        }
+        await Promise.all([loadShopStats(), loadShopOrders()]);
+      } else {
+        toast(res.error || `Failed to update order status`, 'error');
+        await loadShopOrders();
       }
-      await loadShopStats();
-      await loadShopOrders();
-    } else {
-      toast(res.error || `Failed to update order status`, 'error');
-      await loadShopOrders();
+    } catch (e) {
+      toast('Network error updating order status', 'error');
+    } finally {
+      _orderUpdating.delete(orderId);
+      if (btn && btn.dataset.prevHtml) {
+        btn.disabled = false;
+        btn.innerHTML = btn.dataset.prevHtml;
+      }
     }
   }
 
@@ -3584,12 +3645,36 @@ const App = (() => {
     }
   }
 
-  async function verifyPay(orderId) {
-    const res = await api('verify_payment', { order_id: orderId, payment_status: 'Paid' }, 'POST');
-    if (res.success) {
-      toast('Payment marked as Paid');
-      await loadShopStats();
-      await loadShopOrders();
+  let _verifyPayPending = false;
+  async function verifyPay(orderId, btn = null) {
+    if (!btn && typeof window !== 'undefined' && window.event && window.event.target) {
+      btn = window.event.target.closest('button');
+    }
+    if (_verifyPayPending) return;
+    _verifyPayPending = true;
+
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.prevHtml = btn.innerHTML;
+      btn.innerHTML = '⏳ Verifying...';
+    }
+
+    try {
+      const res = await api('verify_payment', { order_id: orderId, payment_status: 'Paid' }, 'POST');
+      if (res && res.success) {
+        toast('Payment marked as Paid');
+        await Promise.all([loadShopStats(), loadShopOrders()]);
+      } else {
+        toast(res.error || 'Failed to verify payment', 'error');
+      }
+    } catch (e) {
+      toast('Network error verifying payment', 'error');
+    } finally {
+      _verifyPayPending = false;
+      if (btn && btn.dataset.prevHtml) {
+        btn.disabled = false;
+        btn.innerHTML = btn.dataset.prevHtml;
+      }
     }
   }
 
@@ -4598,14 +4683,17 @@ const App = (() => {
   }
 
   // REAL-TIME POLLING
+  let _pollingBusy = false;
   function startPolling() {
     if (state.pollingTimer) clearInterval(state.pollingTimer);
-    state.pollingTimer = setInterval(async () => {
+    const runPoll = async () => {
+      if (_pollingBusy) return;
+      _pollingBusy = true;
       try {
         if (state.role === 'shopkeeper') {
           const d = await api('stream_updates', { role: 'shopkeeper' });
           const curPending = parseInt(qs('#sv1')?.textContent) || 0;
-          if (d.pending_orders_count > curPending) {
+          if (d && d.pending_orders_count > curPending) {
             toast(`🔔 NEW VEGETABLE ORDER received! (${d.pending_orders_count} pending)`);
             if (state.shopTab === 'orders') loadShopOrders(qs('#shopContent'));
             loadShopStats();
@@ -4613,6 +4701,17 @@ const App = (() => {
         }
         await loadNotifications();
       } catch (e) { /* silent */ }
+      finally {
+        _pollingBusy = false;
+      }
+    };
+
+    state.pollingTimer = setInterval(() => {
+      if (document.hidden) {
+        state._hiddenPollCount = (state._hiddenPollCount || 0) + 1;
+        if (state._hiddenPollCount % 5 !== 0) return;
+      }
+      runPoll();
     }, 5000);
   }
 
@@ -4628,15 +4727,23 @@ const App = (() => {
   const Public = {
     setCat(slug) { state.activeCategory = slug; state.activeFilter = 'all'; renderCustomerView(); },
     setFilter(f) { state.activeFilter = f; loadProducts(); },
-    cartChg(pid, unit, delta) { cartChange(pid, unit, delta); renderCartDrawer(); loadProducts(); },
+    cartChg(pid, unit, delta) {
+      cartChange(pid, unit, delta);
+      renderCartDrawer();
+      updateCardActions(pid, unit);
+    },
     addCard(pid, evt) {
       const p = (window._allProducts || []).find(x => x.id == pid);
       if (!p) return;
       const unit = state.selectedProductUnits[pid] || (p.available_units||'1kg').split(',')[0].trim();
       cartAdd(p, unit);
-      loadProducts();
+      renderCartDrawer();
+      updateCardActions(pid, unit);
     },
-    pickUnit(pid, unit, el) { selectUnit(pid, unit, el); loadProducts(); },
+    pickUnit(pid, unit, el) {
+      selectUnit(pid, unit, el);
+      updateCardActions(pid, unit);
+    },
     detail(pid) {
       const p = (window._allProducts || []).find(x => x.id == pid);
       if (p) openProductDetail(p);
@@ -4679,6 +4786,7 @@ const App = (() => {
     loadShopProfile,
     loadShopkeeperPayStatus,
     togglePayMode,
+    updateCardActions,
     getState: () => state,
   };
 
@@ -5291,9 +5399,10 @@ const App = (() => {
   // ───────────────────────────────────────────────
   async function init() {
     Modal.init();
-    await fetchSettings();
-
-    const userData = await api('get_current_user');
+    const [_, userData] = await Promise.all([
+      fetchSettings(),
+      api('get_current_user')
+    ]);
     if (!userData.user) {
       state.user = null;
       state.role = null;
@@ -5368,6 +5477,7 @@ const App = (() => {
     loadShopProfile,
     loadShopkeeperPayStatus,
     togglePayMode,
+    updateCardActions,
     renderShopkeeperView,
     setShopOrderCategory,
     reacceptOrder,

@@ -85,6 +85,11 @@ if (empty($_SESSION['pay_csrf_token'])) {
     $_SESSION['pay_csrf_token'] = bin2hex(random_bytes(32));
 }
 
+// Release session lock for read-only GET requests so they do not block concurrent requests
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 $payService = new PaymentService($db);
 
 // ─── Route dispatcher ─────────────────────────────────────────────────────────

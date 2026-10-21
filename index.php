@@ -1,6 +1,10 @@
 <?php
 // index.php — GreenHarvest 100% Fresh Vegetable Shop
 require_once 'config.php';
+// Release session lock immediately on page load so concurrent requests aren't blocked
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -10,6 +14,12 @@ require_once 'config.php';
   <title>GreenHarvest Veggies | 100% Fresh Online Vegetable Store</title>
   <meta name="description" content="Order 100% farm-fresh vegetables online from GreenHarvest. Tomatoes, Potatoes, Onions, Carrots, Spinach and more — delivered to your doorstep in 30 minutes.">
   <meta name="keywords" content="fresh vegetables online, vegetable delivery, tomato, potato, onion, carrot, spinach, organic vegetables">
+
+  <!-- Resource Preconnects for Faster Asset & Image Delivery -->
+  <link rel="preconnect" href="https://images.unsplash.com" crossorigin>
+  <link rel="dns-prefetch" href="https://images.unsplash.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 
   <!-- ═══ PWA: Manifest & Icons ═══ -->
   <link rel="manifest" href="/manifest.webmanifest">
@@ -25,8 +35,8 @@ require_once 'config.php';
 
   <link rel="stylesheet" href="assets/css/styles.css?v=<?php echo filemtime(__DIR__ . '/assets/css/styles.css'); ?>">
   <link rel="stylesheet" href="pay/assets/pay-checkout.css?v=<?php echo @filemtime(__DIR__ . '/pay/assets/pay-checkout.css'); ?>">
-  <!-- Canvas Confetti -->
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Canvas Confetti (deferred — does not block HTML parsing or initial render) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
 <?php
 $ghMapsKey = getenv('GOOGLE_MAPS_API_KEY');
 if (empty($ghMapsKey) || $ghMapsKey === 'YOUR_GOOGLE_MAPS_API_KEY') {

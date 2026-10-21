@@ -8,6 +8,11 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
 $db = getDB();
 $user = getCurrentUser();
 
+// Run one-time index verification and release session lock for read-only requests
+// to prevent background polling from blocking UI button clicks
+ensurePerformanceIndexes();
+closeSessionIfReadOnly($action);
+
 // Auth & RBAC Helpers
 function checkAuthUser() {
     global $user;
@@ -485,10 +490,6 @@ switch ($action) {
         $est_time = trim($_POST['estimated_delivery_time'] ?? '20-35 mins');
         $maps_api_key = trim($_POST['google_maps_api_key'] ?? '');
 
-        try {
-            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS google_maps_api_key VARCHAR(255) DEFAULT ''");
-        } catch (Exception $e) {}
-
         if (isset($_POST['google_maps_api_key'])) {
             $stmt = $db->prepare("UPDATE shop_settings SET shop_name=?, shop_status=?, shop_upi_id=?, min_order_amount=?, free_delivery_above=?, delivery_charge=?, estimated_delivery_time=?, google_maps_api_key=? WHERE id=1");
             $stmt->execute([$shop_name, $shop_status, $shop_upi_id, $min_order, $free_delivery, $delivery_charge, $est_time, $maps_api_key]);
@@ -861,18 +862,38 @@ switch ($action) {
         $user = checkCustomerRole();
         $userId = $user['id'];
 
-        $stmt = $db->prepare("SELECT * FROM orders WHERE customer_id = ? ORDER BY id DESC");
+        $stmt = $db->prepare("SELECT * FROM orders WHERE customer_id = ? ORDER BY id DESC LIMIT 50");
         $stmt->execute([$userId]);
         $orders = $stmt->fetchAll();
 
-        foreach ($orders as &$ord) {
-            $stmtItems = $db->prepare("SELECT oi.*, p.image_url FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id = ?");
-            $stmtItems->execute([$ord['id']]);
-            $ord['items'] = $stmtItems->fetchAll();
+        if (!empty($orders)) {
+            $orderIds = array_column($orders, 'id');
+            $inPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
 
-            $stmtRev = $db->prepare("SELECT * FROM reviews WHERE order_id = ?");
-            $stmtRev->execute([$ord['id']]);
-            $ord['review'] = $stmtRev->fetch();
+            // Batch fetch items in 1 query (eliminates N+1 database queries)
+            $stmtItems = $db->prepare("SELECT oi.*, p.image_url FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($inPlaceholders)");
+            $stmtItems->execute($orderIds);
+            $allItems = $stmtItems->fetchAll();
+
+            $itemsByOrder = [];
+            foreach ($allItems as $item) {
+                $itemsByOrder[$item['order_id']][] = $item;
+            }
+
+            // Batch fetch reviews in 1 query
+            $stmtRev = $db->prepare("SELECT * FROM reviews WHERE order_id IN ($inPlaceholders)");
+            $stmtRev->execute($orderIds);
+            $allReviews = $stmtRev->fetchAll();
+
+            $reviewsByOrder = [];
+            foreach ($allReviews as $rev) {
+                $reviewsByOrder[$rev['order_id']] = $rev;
+            }
+
+            foreach ($orders as &$ord) {
+                $ord['items'] = $itemsByOrder[$ord['id']] ?? [];
+                $ord['review'] = $reviewsByOrder[$ord['id']] ?? null;
+            }
         }
 
         jsonResponse(['orders' => $orders]);
@@ -1077,15 +1098,26 @@ switch ($action) {
         else if ($filter === 'out_for_delivery') $sql .= " WHERE order_status = 'OutForDelivery'";
         else if ($filter === 'completed') $sql .= " WHERE order_status = 'Delivered'";
         else if ($filter === 'rejected') $sql .= " WHERE order_status = 'Rejected'";
-        $sql .= " ORDER BY id DESC";
+        $sql .= " ORDER BY id DESC LIMIT 100";
 
         $stmt = $db->query($sql);
         $orders = $stmt->fetchAll();
 
-        foreach ($orders as &$ord) {
-            $stmtItems = $db->prepare("SELECT * FROM order_items WHERE order_id = ?");
-            $stmtItems->execute([$ord['id']]);
-            $ord['items'] = $stmtItems->fetchAll();
+        if (!empty($orders)) {
+            $orderIds = array_column($orders, 'id');
+            $inPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
+            $stmtItems = $db->prepare("SELECT oi.*, p.image_url FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id WHERE oi.order_id IN ($inPlaceholders)");
+            $stmtItems->execute($orderIds);
+            $allItems = $stmtItems->fetchAll();
+
+            $itemsByOrder = [];
+            foreach ($allItems as $item) {
+                $itemsByOrder[$item['order_id']][] = $item;
+            }
+
+            foreach ($orders as &$ord) {
+                $ord['items'] = $itemsByOrder[$ord['id']] ?? [];
+            }
         }
 
         jsonResponse(['orders' => $orders]);
@@ -1094,35 +1126,36 @@ switch ($action) {
     case 'get_shop_dashboard':
         checkShopkeeperRole();
         $today = date('Y-m-d');
-        
-        $todayOrders = $db->query("SELECT COUNT(*) FROM orders WHERE DATE(created_at) = '$today'")->fetchColumn();
-        $pendingOrders = $db->query("SELECT COUNT(*) FROM orders WHERE order_status = 'Placed'")->fetchColumn();
-        $preparingOrders = $db->query("SELECT COUNT(*) FROM orders WHERE order_status IN ('Accepted', 'Preparing')")->fetchColumn();
-        $outDelivery = $db->query("SELECT COUNT(*) FROM orders WHERE order_status = 'OutForDelivery'")->fetchColumn();
-        $completedOrders = $db->query("SELECT COUNT(*) FROM orders WHERE order_status = 'Delivered'")->fetchColumn();
-        
-        // Accurate Sales for today: only paid orders on current day, excluding rejected and cancelled orders
-        $todaySales = $db->query("SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE DATE(created_at) = '$today' AND payment_status = 'Paid' AND order_status NOT IN ('Rejected', 'Cancelled')")->fetchColumn() ?: 0;
-        
-        // Accurate Pending Payments: orders with payment_status = 'Pending' that are not rejected or cancelled
-        $pendingPayments = $db->query("SELECT COUNT(*) FROM orders WHERE payment_status = 'Pending' AND order_status NOT IN ('Rejected', 'Cancelled')")->fetchColumn() ?: 0;
-        $pendingPaymentsAmount = $db->query("SELECT COALESCE(SUM(total_amount), 0) FROM orders WHERE payment_status = 'Pending' AND order_status NOT IN ('Rejected', 'Cancelled')")->fetchColumn() ?: 0;
 
-        // Active and Rejected order counts for Order Management categories
-        $activeOrders = $db->query("SELECT COUNT(*) FROM orders WHERE order_status IN ('Accepted', 'Preparing', 'OutForDelivery')")->fetchColumn() ?: 0;
-        $rejectedOrders = $db->query("SELECT COUNT(*) FROM orders WHERE order_status = 'Rejected'")->fetchColumn() ?: 0;
+        // Single optimized aggregation query replacing 10 sequential database round trips
+        $stmt = $db->prepare("
+            SELECT
+                COUNT(*) FILTER (WHERE DATE(created_at) = :today) AS today_orders,
+                COUNT(*) FILTER (WHERE order_status = 'Placed') AS pending_orders,
+                COUNT(*) FILTER (WHERE order_status IN ('Accepted', 'Preparing')) AS preparing_orders,
+                COUNT(*) FILTER (WHERE order_status = 'OutForDelivery') AS out_for_delivery,
+                COUNT(*) FILTER (WHERE order_status = 'Delivered') AS completed_orders,
+                COALESCE(SUM(total_amount) FILTER (WHERE DATE(created_at) = :today AND payment_status = 'Paid' AND order_status NOT IN ('Rejected', 'Cancelled')), 0) AS today_sales,
+                COUNT(*) FILTER (WHERE payment_status = 'Pending' AND order_status NOT IN ('Rejected', 'Cancelled')) AS pending_payments,
+                COALESCE(SUM(total_amount) FILTER (WHERE payment_status = 'Pending' AND order_status NOT IN ('Rejected', 'Cancelled')), 0) AS pending_payments_amount,
+                COUNT(*) FILTER (WHERE order_status IN ('Accepted', 'Preparing', 'OutForDelivery')) AS active_orders,
+                COUNT(*) FILTER (WHERE order_status = 'Rejected') AS rejected_orders
+            FROM orders
+        ");
+        $stmt->execute([':today' => $today]);
+        $stats = $stmt->fetch();
 
         jsonResponse([
-            'today_orders' => intval($todayOrders),
-            'pending_orders' => intval($pendingOrders),
-            'preparing_orders' => intval($preparingOrders),
-            'out_for_delivery' => intval($outDelivery),
-            'completed_orders' => intval($completedOrders),
-            'today_sales' => floatval($todaySales),
-            'pending_payments' => intval($pendingPayments),
-            'pending_payments_amount' => floatval($pendingPaymentsAmount),
-            'active_orders' => intval($activeOrders),
-            'rejected_orders' => intval($rejectedOrders)
+            'today_orders' => intval($stats['today_orders'] ?? 0),
+            'pending_orders' => intval($stats['pending_orders'] ?? 0),
+            'preparing_orders' => intval($stats['preparing_orders'] ?? 0),
+            'out_for_delivery' => intval($stats['out_for_delivery'] ?? 0),
+            'completed_orders' => intval($stats['completed_orders'] ?? 0),
+            'today_sales' => floatval($stats['today_sales'] ?? 0),
+            'pending_payments' => intval($stats['pending_payments'] ?? 0),
+            'pending_payments_amount' => floatval($stats['pending_payments_amount'] ?? 0),
+            'active_orders' => intval($stats['active_orders'] ?? 0),
+            'rejected_orders' => intval($stats['rejected_orders'] ?? 0)
         ]);
         break;
 
@@ -1136,10 +1169,22 @@ switch ($action) {
     // --- SALES REPORTS ---
     case 'get_sales_reports':
         checkShopkeeperRole();
-        $todaySales = $db->query("SELECT SUM(total_amount) FROM orders WHERE DATE(created_at) = CURDATE() AND order_status != 'Rejected'")->fetchColumn() ?: 0;
-        $weeklySales = $db->query("SELECT SUM(total_amount) FROM orders WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) AND order_status != 'Rejected'")->fetchColumn() ?: 0;
-        $monthlySales = $db->query("SELECT SUM(total_amount) FROM orders WHERE MONTH(created_at) = MONTH(CURRENT_DATE()) AND order_status != 'Rejected'")->fetchColumn() ?: 0;
-        $totalOrders = $db->query("SELECT COUNT(*) FROM orders WHERE order_status != 'Rejected'")->fetchColumn();
+
+        // 100% PostgreSQL-compatible aggregated metrics
+        $stmt = $db->query("
+            SELECT
+                COALESCE(SUM(total_amount) FILTER (WHERE DATE(created_at) = CURRENT_DATE AND order_status != 'Rejected'), 0) AS today_sales,
+                COALESCE(SUM(total_amount) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days' AND order_status != 'Rejected'), 0) AS weekly_sales,
+                COALESCE(SUM(total_amount) FILTER (WHERE EXTRACT(MONTH FROM created_at) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE) AND order_status != 'Rejected'), 0) AS monthly_sales,
+                COUNT(*) FILTER (WHERE order_status != 'Rejected') AS total_orders
+            FROM orders
+        ");
+        $salesRow = $stmt->fetch();
+
+        $todaySales = floatval($salesRow['today_sales'] ?? 0);
+        $weeklySales = floatval($salesRow['weekly_sales'] ?? 0);
+        $monthlySales = floatval($salesRow['monthly_sales'] ?? 0);
+        $totalOrders = intval($salesRow['total_orders'] ?? 0);
         $avgOrderValue = ($totalOrders > 0) ? ($monthlySales / $totalOrders) : 0;
 
         // Top Sold Vegetables Leaderboard
@@ -1472,9 +1517,6 @@ switch ($action) {
 
     // --- REALTIME POLLING / NOTIFICATIONS ---
     case 'get_notifications':
-        // Safely ensure is_dismissed column exists (PostgreSQL compatible)
-        try { $db->exec("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_dismissed SMALLINT DEFAULT 0"); } catch(Exception $e) {}
-
         $role = $user['role'] ?? ($_GET['role'] ?? 'customer');
         $userId = $user['id'] ?? null;
 
@@ -1541,7 +1583,6 @@ switch ($action) {
 
     case 'clear_notifications':
         $authUser = checkAuthUser();
-        try { $db->exec("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_dismissed SMALLINT DEFAULT 0"); } catch(Exception $e) {}
 
         if ($authUser['role'] === 'customer') {
             // Mark all this customer's notifications as dismissed (never deletes orders/payments)
@@ -1557,12 +1598,15 @@ switch ($action) {
 
     case 'stream_updates':
         $role = $_GET['role'] ?? 'customer';
-        $pendingCount = $db->query("SELECT COUNT(*) FROM orders WHERE order_status = 'Placed'")->fetchColumn();
-        $shop = $db->query("SELECT shop_status FROM shop_settings WHERE id = 1")->fetch();
+        $row = $db->query("
+            SELECT
+                (SELECT COUNT(*) FROM orders WHERE order_status = 'Placed') AS pending_orders_count,
+                (SELECT shop_status FROM shop_settings WHERE id = 1) AS shop_status
+        ")->fetch();
 
         jsonResponse([
-            'pending_orders_count' => intval($pendingCount),
-            'shop_status' => $shop['shop_status'] ?? 'OPEN'
+            'pending_orders_count' => intval($row['pending_orders_count'] ?? 0),
+            'shop_status' => $row['shop_status'] ?? 'OPEN'
         ]);
         break;
 
@@ -1587,7 +1631,6 @@ switch ($action) {
                 )
             ");
             $db->exec("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order ON delivery_tracking(order_id)");
-            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS google_maps_api_key VARCHAR(255) DEFAULT ''");
         } catch (Exception $e) { /* table already exists */ }
         jsonResponse(['success' => true]);
         break;

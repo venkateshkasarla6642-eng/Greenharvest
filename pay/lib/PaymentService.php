@@ -45,6 +45,9 @@ class PaymentService {
     // ─── Auto-migration ──────────────────────────────────────────────────────
 
     private function ensureSchema(): void {
+        static $checked = false;
+        if ($checked) return;
+        $checked = true;
         try {
             $exists = $this->db->query("SELECT 1 FROM information_schema.tables WHERE table_name = 'gh_pay_settings'")->fetchColumn();
             if (!$exists) {

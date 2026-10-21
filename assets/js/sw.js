@@ -1,14 +1,15 @@
-// assets/js/sw.js — GreenHarvest PWA Service Worker v2
-// Caches static assets for offline shell; never caches auth/API/private data.
-// Updated: icons now correctly sized (192, 512) — cache version bumped.
+// assets/js/sw.js — GreenHarvest PWA Service Worker v3
+// High-performance Stale-While-Revalidate for static assets; never caches private/auth/API data.
 
-const CACHE_NAME = 'gh-shell-v2';
+const CACHE_NAME = 'gh-shell-v3';
 
 // Static assets to pre-cache (app shell)
 const SHELL_ASSETS = [
   '/',
   '/assets/css/styles.css',
   '/assets/js/app.js',
+  '/pay/assets/pay-checkout.css',
+  '/pay/assets/pay-checkout.js',
   '/assets/icons/icon-192.png',
   '/assets/icons/icon-512.png',
   '/assets/icons/icon-maskable-192.png',
@@ -22,6 +23,8 @@ const SHELL_ASSETS = [
 const NO_CACHE_PATTERNS = [
   /\/api\.php/,
   /\/seed\.php/,
+  /\/pay\/api\.php/,
+  /\/pay\/webhook\.php/,
   /action=/,
   /token=/,
   /session/,
@@ -56,50 +59,59 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// ─── FETCH: Network-first strategy ────────────────
-// API calls: always network, no caching.
-// Static assets: network-first, fallback to cache.
+// ─── FETCH: Intelligent Caching Strategy ──────────
+// - API & Dynamic routes: Network only (never cached).
+// - Navigation / HTML: Network-first with cache fallback.
+// - Static assets (CSS, JS, Icons): Stale-While-Revalidate for instant repeat loads.
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
   // Skip non-GET requests
   if (event.request.method !== 'GET') return;
 
-  // Skip cross-origin requests (CDN scripts, fonts, etc.)
+  // Skip cross-origin requests
   if (url.origin !== self.location.origin) return;
 
   // Never intercept API / auth / sensitive routes
   const isPrivate = NO_CACHE_PATTERNS.some((p) => p.test(url.href));
-  if (isPrivate) return; // Let browser handle naturally
+  if (isPrivate) return;
 
-  // Network-first for everything else
-  event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Cache valid responses for static assets
-        if (response && response.status === 200) {
-          const isStaticAsset =
-            url.pathname.startsWith('/assets/') ||
-            url.pathname === '/' ||
-            url.pathname.endsWith('.webmanifest');
-
-          if (isStaticAsset) {
+  // Navigation requests: Network first, fallback to cached shell
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
-        }
-        return response;
-      })
-      .catch(() => {
-        // Offline fallback: serve cached version if available
-        return caches.match(event.request).then((cached) => {
-          if (cached) return cached;
-          // For navigation requests, serve cached homepage as fallback
-          if (event.request.mode === 'navigate') {
-            return caches.match('/');
+          return response;
+        })
+        .catch(() => caches.match('/').then((cached) => cached || new Response('', { status: 503 })))
+    );
+    return;
+  }
+
+  // Static Assets (CSS, JS, Images, Icons): Stale-While-Revalidate
+  const isStatic = url.pathname.startsWith('/assets/') || url.pathname.startsWith('/pay/assets/') || url.pathname.endsWith('.webmanifest');
+  if (isStatic) {
+    event.respondWith(
+      caches.match(event.request).then((cachedResponse) => {
+        const fetchPromise = fetch(event.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
           }
-          return new Response('', { status: 503 });
-        });
+          return networkResponse;
+        }).catch(() => null);
+
+        // Return cached version immediately if available, otherwise wait for network
+        return cachedResponse || fetchPromise;
       })
-  );
+    );
+    return;
+  }
+
+  // Default fallback
+  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
 });

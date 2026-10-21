@@ -14,9 +14,18 @@ const PayAdmin = (function() {
 
   // ─── Utility ────────────────────────────────────────────────────────────
 
+  function _timeoutSignal(ms = 15000) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), ms);
+    return ctrl.signal;
+  }
+
   function api(params, method = 'GET') {
     const url = API + (method === 'GET' ? '?' + new URLSearchParams(params).toString() : '');
-    const opts = { credentials: 'same-origin' };
+    const opts = { credentials: 'same-origin', signal: _timeoutSignal(15000) };
 
     if (method === 'POST') {
       const body = new URLSearchParams(params);

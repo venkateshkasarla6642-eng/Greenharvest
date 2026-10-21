@@ -55,13 +55,78 @@ function jsonResponse($data, $statusCode = 200) {
 }
 
 function getCurrentUser() {
+    static $cachedUser = false;
+    if ($cachedUser !== false) {
+        return $cachedUser;
+    }
     if (isset($_SESSION['user_id'])) {
         $db = getDB();
         $stmt = $db->prepare("SELECT id, name, phone, email, profile_photo, role, address, house_no, street, city, district, state, pincode FROM users WHERE id = ?");
         $stmt->execute([$_SESSION['user_id']]);
-        return $stmt->fetch();
+        $cachedUser = $stmt->fetch() ?: null;
+        return $cachedUser;
     }
+    $cachedUser = null;
     return null;
+}
+
+/**
+ * Releases PHP session lock for read-only actions so concurrent requests
+ * (like polling vs button clicks) do not block each other.
+ */
+function closeSessionIfReadOnly(string $action): void {
+    $readOnlyActions = [
+        'get_current_user',
+        'get_shop_settings',
+        'get_categories',
+        'get_products',
+        'get_product_detail',
+        'get_customer_orders',
+        'get_shop_orders',
+        'get_shop_dashboard',
+        'get_customer_payments',
+        'get_shop_payments',
+        'get_notifications',
+        'stream_updates',
+        'get_addresses',
+        'get_reviews',
+        'get_offers',
+        'get_pay_gateway_status',
+        'get_delivery_location',
+        'get_chat_messages',
+        'get_shop_chat_list'
+    ];
+    if (in_array($action, $readOnlyActions, true) && session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+}
+
+/**
+ * Ensures critical PostgreSQL indexes exist for maximum query performance.
+ * Runs once per user session to avoid repeated catalog queries.
+ */
+function ensurePerformanceIndexes(): void {
+    if (!empty($_SESSION['perf_indexes_checked'])) return;
+    try {
+        $db = getDB();
+        $db->exec("
+            CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_order_status ON orders(order_status);
+            CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status);
+            CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+            CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id);
+            CREATE INDEX IF NOT EXISTS idx_notifications_lookup ON notifications(for_role, is_dismissed);
+            CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+            CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id, is_active);
+            CREATE INDEX IF NOT EXISTS idx_customer_addresses_cust ON customer_addresses(customer_id);
+        ");
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            $_SESSION['perf_indexes_checked'] = 1;
+        }
+    } catch (\Throwable $e) {
+        // Silently catch
+    }
 }
 
 /**

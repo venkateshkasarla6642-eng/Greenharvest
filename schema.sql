@@ -216,3 +216,18 @@ DROP TRIGGER IF EXISTS delivery_tracking_ts_trigger ON delivery_tracking;
 CREATE TRIGGER delivery_tracking_ts_trigger
   BEFORE UPDATE ON delivery_tracking
   FOR EACH ROW EXECUTE FUNCTION update_delivery_tracking_ts();
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- PERFORMANCE INDEXES (High-Speed Filtering & Zero Seq Scans)
+-- ══════════════════════════════════════════════════════════════════════════════
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_order_status ON orders(order_status);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status);
+CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_lookup ON notifications(for_role, is_dismissed);
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_customer_addresses_cust ON customer_addresses(customer_id);
+CREATE INDEX IF NOT EXISTS idx_support_messages_cust ON support_messages(customer_id);

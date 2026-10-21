@@ -38,12 +38,21 @@ const GHPay = (function () {
   let _csrfToken = null;
   let _cachedSettings = null;
 
+  function _timeoutSignal(ms = 15000) {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(ms);
+    }
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), ms);
+    return ctrl.signal;
+  }
+
   // ── Fetch CSRF token once per session ──────────────────────────────────────
 
   async function ensureCsrf() {
     if (_csrfToken) return _csrfToken;
     try {
-      const r = await fetch(API_URL + '?action=get_csrf_token', { credentials: 'same-origin' });
+      const r = await fetch(API_URL + '?action=get_csrf_token', { credentials: 'same-origin', signal: _timeoutSignal(10000) });
       const d = await r.json();
       _csrfToken = d.csrf_token || '';
     } catch (e) {
@@ -62,7 +71,7 @@ const GHPay = (function () {
     for (const [k, v] of Object.entries(data)) form.append(k, v);
 
     try {
-      const r = await fetch(API_URL, { method: 'POST', body: form, credentials: 'same-origin' });
+      const r = await fetch(API_URL, { method: 'POST', body: form, credentials: 'same-origin', signal: _timeoutSignal(15000) });
       return await r.json();
     } catch (e) {
       return { error: 'Network error. Please check your connection.' };
@@ -72,7 +81,7 @@ const GHPay = (function () {
   async function payGet(action, params = {}) {
     const url = API_URL + '?' + new URLSearchParams({ action, ...params }).toString();
     try {
-      const r = await fetch(url, { credentials: 'same-origin' });
+      const r = await fetch(url, { credentials: 'same-origin', signal: _timeoutSignal(15000) });
       return await r.json();
     } catch (e) {
       return { error: 'Network error.' };
