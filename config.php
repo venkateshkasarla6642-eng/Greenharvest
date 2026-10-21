@@ -1,6 +1,8 @@
 <?php
 // config.php - Database Configuration & Helpers (PostgreSQL)
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 // Support DATABASE_URL (external Render connection string) for cross-region deployments
 $databaseUrl = getenv('DATABASE_URL');
@@ -48,9 +50,12 @@ function getDB() {
 }
 
 function jsonResponse($data, $statusCode = 200) {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     http_response_code($statusCode);
-    header('Content-Type: application/json');
-    echo json_encode($data);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 

@@ -3,10 +3,14 @@
 // Handles both owner-admin and customer payment actions.
 // Every endpoint verifies the caller's server-side role before acting.
 
+ob_start();
+ini_set('display_errors', '0');
+error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING & ~E_DEPRECATED);
+
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/lib/PaymentService.php';
 
-header('Content-Type: application/json');
+header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 
@@ -94,6 +98,7 @@ $payService = new PaymentService($db);
 
 // ─── Route dispatcher ─────────────────────────────────────────────────────────
 
+try {
 switch ($action) {
 
     // ════════════════════════════════════════════════════════════════════════
@@ -232,7 +237,7 @@ switch ($action) {
      */
     case 'initiate_payment':
         $u = payRequireAuth();
-        payRateLimit('initiate_' . $u['id'], 15);
+        payRateLimit('initiate_' . $u['id'], 60);
 
         $orderId        = intval($_POST['order_id'] ?? 0);
         $method         = trim($_POST['method'] ?? 'qr_upi');
@@ -819,4 +824,11 @@ switch ($action) {
     default:
         jsonResponse(['error' => 'Invalid GreenHarvest Pay action.'], 400);
         break;
+}
+} catch (\Throwable $e) {
+    error_log('[GHPay][API Error] ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+    jsonResponse([
+        'success' => false,
+        'error'   => 'Payment request error: ' . $e->getMessage()
+    ], 500);
 }

@@ -117,12 +117,23 @@ const GHPay = (function () {
       try {
         d = JSON.parse(text);
       } catch (jsonErr) {
+        // Robust JSON extraction: if PHP emitted notices, warnings, or HTML before/after the JSON
+        const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (match) {
+          try {
+            d = JSON.parse(match[0]);
+          } catch (e) {}
+        }
+      }
+
+      if (!d) {
         console.error('[GHPay] Non-JSON response for action:', action, 'status:', r.status, text.slice(0, 300));
+        const stripped = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         return {
           success: false,
-          error: r.ok
-            ? 'Invalid response format from server.'
-            : `Server returned HTTP ${r.status}. Please try again.`
+          error: (stripped.length > 5 && stripped.length < 150)
+            ? stripped
+            : (r.ok ? 'Server returned an invalid response. Please try again.' : `Server returned HTTP ${r.status}. Please try again.`)
         };
       }
 
@@ -151,6 +162,10 @@ const GHPay = (function () {
       try {
         return JSON.parse(text);
       } catch (jsonErr) {
+        const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (match) {
+          try { return JSON.parse(match[0]); } catch (e) {}
+        }
         console.error('[GHPay] Non-JSON GET response for action:', action, 'status:', r.status, text.slice(0, 300));
         return { success: false, error: `Server HTTP ${r.status}` };
       }

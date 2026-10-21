@@ -617,11 +617,22 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     document.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '0.6'; });
 
     try {
-      const res = await fetch('api.php', {
+      const r = await fetch('api.php', {
         method: 'POST',
         body: form,
         credentials: 'same-origin'
-      }).then(r => r.json());
+      });
+
+      const text = await r.text();
+      let res = null;
+      try {
+        res = JSON.parse(text);
+      } catch (err) {
+        const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (match) {
+          try { res = JSON.parse(match[0]); } catch (e) {}
+        }
+      }
 
       document.querySelectorAll('button').forEach(b => { b.disabled = false; b.style.opacity = '1'; });
 

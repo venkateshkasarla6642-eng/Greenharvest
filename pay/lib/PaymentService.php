@@ -299,7 +299,8 @@ class PaymentService {
             $ins = $this->db->prepare(
                 "INSERT INTO gh_payment_attempts
                  (payment_ref, idempotency_key, order_id, customer_id, amount, method, status, is_sandbox)
-                 VALUES (?, ?, ?, ?, ?, ?, 'initiated', ?)"
+                 VALUES (?, ?, ?, ?, ?, ?, 'initiated', ?)
+                 RETURNING id"
             );
             $ins->execute([
                 $paymentRef,
@@ -310,7 +311,10 @@ class PaymentService {
                 $method,
                 $isSandbox
             ]);
-            $attemptId = (int)$this->db->lastInsertId();
+            $attemptId = (int)$ins->fetchColumn();
+            if ($attemptId <= 0) {
+                $attemptId = (int)$this->db->lastInsertId();
+            }
 
             $this->db->commit();
         } catch (\Throwable $e) {
@@ -471,10 +475,12 @@ class PaymentService {
                 default    => 'Pending'
             };
 
-            $updOrder = $this->db->prepare(
-                "UPDATE orders SET payment_status = ?, upi_trans_id = COALESCE(NULLIF(upi_trans_id, ''), ?) WHERE id = ?"
-            );
-            $updOrder->execute([$orderPaymentStatus, $attempt['payment_ref'], $attempt['order_id']]);
+            if (!empty($attempt['order_id'])) {
+                $updOrder = $this->db->prepare(
+                    "UPDATE orders SET payment_status = ?, upi_trans_id = COALESCE(NULLIF(upi_trans_id, ''), ?) WHERE id = ?"
+                );
+                $updOrder->execute([$orderPaymentStatus, $attempt['payment_ref'], $attempt['order_id']]);
+            }
 
             $this->db->commit();
         } catch (\Throwable $e) {
@@ -545,7 +551,8 @@ class PaymentService {
             $ins = $this->db->prepare(
                 "INSERT INTO gh_qr_submissions
                  (payment_attempt_id, order_id, customer_id, utr_reference, screenshot_path, verification_status)
-                 VALUES (?, ?, ?, ?, ?, 'pending')"
+                 VALUES (?, ?, ?, ?, ?, 'pending')
+                 RETURNING id"
             );
             $ins->execute([
                 $attemptId,
@@ -554,7 +561,10 @@ class PaymentService {
                 $utrRef,
                 $screenshotPath
             ]);
-            $submissionId = (int)$this->db->lastInsertId();
+            $submissionId = (int)$ins->fetchColumn();
+            if ($submissionId <= 0) {
+                $submissionId = (int)$this->db->lastInsertId();
+            }
 
             // Move attempt to pending
             $upd = $this->db->prepare(
