@@ -54,6 +54,9 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     <a href="#" class="pay-nav-item" data-section="transactions" onclick="PayAdmin.showSection('transactions',this)">
       <span class="pay-nav-icon">📋</span> Transactions
     </a>
+    <a href="#" class="pay-nav-item" data-section="payment_links" onclick="PayAdmin.showSection('payment_links',this)">
+      <span class="pay-nav-icon">🔗</span> Create Payment Link
+    </a>
     <a href="#" class="pay-nav-item" data-section="qr_queue" onclick="PayAdmin.showSection('qr_queue',this)">
       <span class="pay-nav-icon">🔍</span> QR Verification
       <span class="pay-badge" id="qrQueueBadge" style="display:none;">0</span>
@@ -194,6 +197,193 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       <div class="pay-empty">Loading transactions…</div>
     </div>
     <div class="pay-pagination" id="txPagination"></div>
+  </section>
+
+  <!-- ── Create Payment Link Section ── -->
+  <section id="sec-payment_links" class="pay-section">
+    <div class="pay-section-header">
+      <div>
+        <h1 class="pay-section-title">Create Payment Link</h1>
+        <p class="pay-desc" style="margin-top:4px;">Generate secure, shareable payment links to collect payments via UPI, QR, or Gateway across WhatsApp, Telegram, SMS, or Email.</p>
+      </div>
+      <button class="pay-btn pay-btn-outline" onclick="PayAdmin.loadPaymentLinks()">🔄 Refresh Links</button>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="pay-stats-grid" style="margin-bottom:24px;">
+      <div class="pay-stat-card pay-stat-paid">
+        <div class="pay-stat-icon">💰</div>
+        <div class="pay-stat-value" id="plStatPaidTotal">₹0.00</div>
+        <div class="pay-stat-label">Collected via Links</div>
+        <div class="pay-stat-count" id="plStatPaidCount">0 paid links</div>
+      </div>
+      <div class="pay-stat-card pay-stat-pending">
+        <div class="pay-stat-icon">⏳</div>
+        <div class="pay-stat-value" id="plStatUnpaidCount">0</div>
+        <div class="pay-stat-label">Active Unpaid Links</div>
+        <div class="pay-stat-count" id="plStatPendingReview">0 pending review</div>
+      </div>
+      <div class="pay-stat-card pay-stat-today">
+        <div class="pay-stat-icon">🔗</div>
+        <div class="pay-stat-value" id="plStatTotalCount">0</div>
+        <div class="pay-stat-label">Total Links Created</div>
+        <div class="pay-stat-count" id="plStatExpiredCount">0 expired / cancelled</div>
+      </div>
+    </div>
+
+    <!-- Main Creation Grid -->
+    <div class="pay-link-create-grid">
+      <!-- Creation Form Card -->
+      <div class="pay-card">
+        <div class="pay-card-header">
+          <h3 class="pay-card-title">➕ New Payment Request</h3>
+        </div>
+        <form id="createPaymentLinkForm" onsubmit="PayAdmin.submitCreatePaymentLink(event)">
+          <div class="pay-form-group">
+            <label class="pay-label">Payment Purpose / Title <span style="color:var(--pay-red);">*</span></label>
+            <input type="text" name="title" id="plInputTitle" class="pay-input" placeholder="e.g. Fresh Vegetable Delivery - Order #104" required style="width:100%;">
+          </div>
+
+          <div class="pay-form-group">
+            <label class="pay-label">Amount in INR (₹) <span style="color:var(--pay-red);">*</span></label>
+            <div style="position:relative;">
+              <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-weight:700;color:var(--pay-primary);font-size:15px;">₹</span>
+              <input type="number" name="amount" id="plInputAmount" class="pay-input" placeholder="0.00" step="0.01" min="1" max="100000" required style="width:100%;padding-left:28px;font-size:16px;font-weight:700;">
+            </div>
+            <div style="font-size:11px;color:var(--pay-text-muted);margin-top:4px;">Min ₹1.00 · Max ₹1,00,000.00</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+            <div class="pay-form-group" style="border-right:1px solid var(--pay-border);">
+              <label class="pay-label">Customer Name (Optional)</label>
+              <input type="text" name="customer_name" id="plInputCustName" class="pay-input" placeholder="e.g. Ramesh Kumar" style="width:100%;">
+            </div>
+            <div class="pay-form-group">
+              <label class="pay-label">Customer Phone (Optional)</label>
+              <input type="tel" name="customer_phone" id="plInputCustPhone" class="pay-input" placeholder="e.g. 9876543210" style="width:100%;">
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+            <div class="pay-form-group" style="border-right:1px solid var(--pay-border);">
+              <label class="pay-label">Customer Email (Optional)</label>
+              <input type="email" name="customer_email" id="plInputCustEmail" class="pay-input" placeholder="e.g. customer@gmail.com" style="width:100%;">
+            </div>
+            <div class="pay-form-group">
+              <label class="pay-label">Order / Invoice Ref (Optional)</label>
+              <input type="text" name="order_ref" id="plInputOrderRef" class="pay-input" placeholder="e.g. ORD-104 or INV-2026" style="width:100%;">
+            </div>
+          </div>
+
+          <div class="pay-form-group">
+            <label class="pay-label">Link Expiration</label>
+            <select name="expires_in" id="plInputExpiresIn" class="pay-select" style="width:100%;">
+              <option value="">Never Expires (Always Active)</option>
+              <option value="1h">Expires in 1 Hour</option>
+              <option value="6h">Expires in 6 Hours</option>
+              <option value="24h" selected>Expires in 24 Hours (Recommended)</option>
+              <option value="3d">Expires in 3 Days</option>
+              <option value="7d">Expires in 7 Days</option>
+              <option value="30d">Expires in 30 Days</option>
+            </select>
+          </div>
+
+          <div class="pay-form-group">
+            <label class="pay-label">Payment Description / Notes (Optional)</label>
+            <textarea name="description" id="plInputDescription" class="pay-input" rows="2" placeholder="e.g. Fresh farm vegetables basket (2kg Potato, 1kg Tomato, Onion)" style="width:100%;resize:vertical;"></textarea>
+          </div>
+
+          <div class="pay-form-actions">
+            <button type="submit" id="plSubmitBtn" class="pay-btn pay-btn-primary" style="width:100%;padding:12px;font-size:14px;font-weight:700;">
+              🚀 Create Payment Link
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Share / Success Card -->
+      <div class="pay-card" id="plSuccessPanel" style="display:none;">
+        <div class="pay-card-header" style="background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(99,102,241,0.08));">
+          <h3 class="pay-card-title" style="color:var(--pay-primary);">🎉 Payment Link Ready!</h3>
+          <span class="pay-badge" style="background:var(--pay-primary);font-size:11px;padding:3px 8px;">Active</span>
+        </div>
+        <div style="padding:20px;">
+          <div style="background:var(--pay-surface2);border:1px solid var(--pay-border2);border-radius:12px;padding:16px;margin-bottom:16px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <span id="plResultTitle" style="font-size:14px;font-weight:700;color:var(--pay-text);">Payment Request</span>
+              <span id="plResultAmount" style="font-size:20px;font-weight:900;color:var(--pay-primary);">₹0.00</span>
+            </div>
+            <div id="plResultSub" style="font-size:12px;color:var(--pay-text-muted);">Customer: Ramesh · Ref: ORD-104</div>
+          </div>
+
+          <!-- Public URL Box with Copy Button -->
+          <label class="pay-label">Shareable Payment Link URL</label>
+          <div style="display:flex;gap:8px;margin-bottom:16px;">
+            <input type="text" id="plResultUrl" class="pay-input" readonly style="flex:1;background:var(--pay-bg);font-family:monospace;font-size:12.5px;color:var(--pay-primary);">
+            <button type="button" class="pay-btn pay-btn-primary" onclick="PayAdmin.copyGeneratedLink()" id="plCopyBtn">
+              📋 Copy
+            </button>
+          </div>
+
+          <!-- Native Mobile Web Share -->
+          <button type="button" class="pay-btn pay-btn-outline" onclick="PayAdmin.shareNativeLink()" style="width:100%;margin-bottom:16px;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;">
+            📱 Share via Phone Apps (Native Share)
+          </button>
+
+          <!-- Quick Share Buttons to Supported Apps -->
+          <label class="pay-label">Quick Share to Customer Apps</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
+            <button type="button" class="pay-share-btn pay-share-whatsapp" onclick="PayAdmin.shareToWhatsApp()">
+              💬 WhatsApp
+            </button>
+            <button type="button" class="pay-share-btn pay-share-telegram" onclick="PayAdmin.shareToTelegram()">
+              ✈️ Telegram
+            </button>
+            <button type="button" class="pay-share-btn pay-share-sms" onclick="PayAdmin.shareToSMS()">
+              ✉️ SMS
+            </button>
+            <button type="button" class="pay-share-btn pay-share-gmail" onclick="PayAdmin.shareToEmail()">
+              📧 Gmail / Email
+            </button>
+          </div>
+
+          <div style="display:flex;gap:8px;">
+            <button type="button" class="pay-btn pay-btn-sm pay-btn-outline" onclick="PayAdmin.copyPaymentDetailsText()" style="flex:1;">
+              📄 Copy Full Details
+            </button>
+            <a id="plResultOpenLink" href="#" target="_blank" class="pay-btn pay-btn-sm pay-btn-outline" style="text-decoration:none;display:flex;align-items:center;justify-content:center;">
+              👁️ Open Page ↗
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payment Links History Table -->
+    <div class="pay-card" style="margin-top:24px;">
+      <div class="pay-card-header">
+        <h3 class="pay-card-title">📋 Payment Links History</h3>
+        <button class="pay-btn pay-btn-sm pay-btn-outline" onclick="PayAdmin.loadPaymentLinks()">🔄 Refresh</button>
+      </div>
+
+      <!-- Filters -->
+      <div class="pay-filters" style="padding:16px 20px 0 20px;">
+        <input type="text" id="plFilterSearch" placeholder="Search title, customer, ref, or token…" class="pay-input" oninput="PayAdmin.filterPaymentLinks()" style="flex:1;min-width:220px;">
+        <select id="plFilterStatus" class="pay-select" onchange="PayAdmin.filterPaymentLinks()">
+          <option value="all">All Status</option>
+          <option value="unpaid">Unpaid (Active)</option>
+          <option value="paid">Paid &amp; Verified</option>
+          <option value="pending">Pending Verification</option>
+          <option value="expired">Expired</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+
+      <div id="paymentLinksTable" class="pay-table-wrap">
+        <div class="pay-empty">Loading payment links…</div>
+      </div>
+      <div class="pay-pagination" id="paymentLinksPagination"></div>
+    </div>
   </section>
 
   <!-- ── QR Verification Queue ── -->

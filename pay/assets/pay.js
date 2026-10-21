@@ -92,12 +92,13 @@ const PayAdmin = (function() {
 
     // Lazy-load section data
     switch(name) {
-      case 'overview':     loadDashboard();      break;
-      case 'transactions': loadTransactions();   break;
-      case 'qr_queue':     loadQrQueue();        break;
-      case 'reports':      loadReports();        break;
-      case 'audit':        loadAudit();          break;
-      case 'settings':     loadSettings();       break;
+      case 'overview':      loadDashboard();      break;
+      case 'transactions':  loadTransactions();   break;
+      case 'payment_links': loadPaymentLinks();   break;
+      case 'qr_queue':      loadQrQueue();        break;
+      case 'reports':       loadReports();        break;
+      case 'audit':         loadAudit();          break;
+      case 'settings':      loadSettings();       break;
     }
   }
 
@@ -705,6 +706,419 @@ const PayAdmin = (function() {
     if (ov) ov.classList.remove('show');
   }
 
+  // ─── Payment Links (Create & Share) ──────────────────────────────────────
+
+  let currentCreatedLink = null;
+  let cachedPaymentLinks = [];
+  let plFilterTimer = null;
+
+  function buildShareMessage(title, amount, url, custName) {
+    const greeting = custName ? `Hello ${custName}! 🌿` : 'Hello! 🌿';
+    return `${greeting}
+
+Your GreenHarvest payment request of ₹${parseFloat(amount).toFixed(2)} for "${title}" is ready.
+
+Please click the link below to pay securely:
+${url}
+
+Thank you for shopping with GreenHarvest Fresh Vegetables!`;
+  }
+
+  function copyTextToClipboard(text, successMsg = 'Link copied to clipboard!') {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(() => {
+        toast(successMsg, 'success');
+      }).catch(() => fallbackCopyText(text, successMsg));
+    } else {
+      fallbackCopyText(text, successMsg);
+    }
+  }
+
+  function fallbackCopyText(text, successMsg) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        toast(successMsg, 'success');
+      } else {
+        prompt('Copy this link:', text);
+      }
+    } catch (e) {
+      prompt('Copy this link:', text);
+    }
+  }
+
+  async function submitCreatePaymentLink(event) {
+    event.preventDefault();
+    const btn = document.getElementById('plSubmitBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Creating Payment Link…';
+    }
+
+    const title        = (document.getElementById('plInputTitle')?.value || '').trim();
+    const amount       = parseFloat(document.getElementById('plInputAmount')?.value || 0);
+    const custName     = (document.getElementById('plInputCustName')?.value || '').trim();
+    const custPhone    = (document.getElementById('plInputCustPhone')?.value || '').trim();
+    const custEmail    = (document.getElementById('plInputCustEmail')?.value || '').trim();
+    const orderRef     = (document.getElementById('plInputOrderRef')?.value || '').trim();
+    const expiresIn    = document.getElementById('plInputExpiresIn')?.value || '';
+    const description  = (document.getElementById('plInputDescription')?.value || '').trim();
+
+    if (!title) {
+      toast('Please enter a payment purpose or title.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '🚀 Create Payment Link'; }
+      return;
+    }
+    if (isNaN(amount) || amount <= 0) {
+      toast('Please enter a valid amount greater than ₹0.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '🚀 Create Payment Link'; }
+      return;
+    }
+
+    const payload = {
+      title,
+      amount,
+      customer_name: custName,
+      customer_phone: custPhone,
+      customer_email: custEmail,
+      order_ref: orderRef,
+      expires_in: expiresIn,
+      description
+    };
+
+    const res = await apiPost('owner_create_payment_link', payload);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Create Payment Link';
+    }
+
+    if (!res || !res.success) {
+      toast(res?.error || 'Failed to create payment link.', 'error');
+      return;
+    }
+
+    const link = res.link;
+    currentCreatedLink = link;
+
+    // Display success panel
+    const panel = document.getElementById('plSuccessPanel');
+    if (panel) {
+      panel.style.display = 'block';
+      setText('plResultTitle', link.title);
+      setText('plResultAmount', link.formatted_amount);
+      setText('plResultSub', `Customer: ${link.customer_name || 'Customer'} · ${link.order_ref ? 'Ref: ' + link.order_ref : 'No Ref'}`);
+      const urlInput = document.getElementById('plResultUrl');
+      if (urlInput) urlInput.value = link.url;
+      const openA = document.getElementById('plResultOpenLink');
+      if (openA) openA.href = link.url;
+
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    toast('🎉 Payment link generated successfully!', 'success');
+    loadPaymentLinks();
+  }
+
+  function copyGeneratedLink() {
+    if (!currentCreatedLink || !currentCreatedLink.url) {
+      toast('No active link to copy.', 'error');
+      return;
+    }
+    copyTextToClipboard(currentCreatedLink.url, 'Payment link copied to clipboard!');
+    const btn = document.getElementById('plCopyBtn');
+    if (btn) {
+      const orig = btn.textContent;
+      btn.textContent = '✓ Copied!';
+      btn.style.background = '#059669';
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.background = '';
+      }, 2000);
+    }
+  }
+
+  function copyLinkByUrl(url) {
+    if (!url) return;
+    copyTextToClipboard(url, 'Payment link copied to clipboard!');
+  }
+
+  function shareNativeLink() {
+    if (!currentCreatedLink || !currentCreatedLink.url) {
+      toast('No payment link available to share.', 'error');
+      return;
+    }
+    const msg = buildShareMessage(
+      currentCreatedLink.title,
+      currentCreatedLink.amount,
+      currentCreatedLink.url,
+      currentCreatedLink.customer_name
+    );
+
+    if (navigator.share) {
+      navigator.share({
+        title: 'GreenHarvest Pay: ' + currentCreatedLink.title,
+        text: msg,
+        url: currentCreatedLink.url
+      }).catch(() => {});
+    } else {
+      // Fallback to copying
+      copyTextToClipboard(msg, 'Payment details copied! You can paste in any app.');
+    }
+  }
+
+  function shareToWhatsApp(url, amount, title, phone, custName) {
+    const u = url || currentCreatedLink?.url;
+    const a = amount || currentCreatedLink?.amount || 0;
+    const t = title || currentCreatedLink?.title || 'Payment';
+    const p = (phone || currentCreatedLink?.customer_phone || '').replace(/[^0-9]/g, '');
+    const n = custName || currentCreatedLink?.customer_name || '';
+
+    if (!u) { toast('No link to share.', 'error'); return; }
+
+    const msg = buildShareMessage(t, a, u, n);
+    let waUrl = 'https://api.whatsapp.com/send?text=' + encodeURIComponent(msg);
+    if (p) {
+      const cleanPhone = (p.length === 10) ? ('91' + p) : p;
+      waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(msg)}`;
+    }
+    window.open(waUrl, '_blank');
+  }
+
+  function shareToTelegram(url, amount, title, custName) {
+    const u = url || currentCreatedLink?.url;
+    const a = amount || currentCreatedLink?.amount || 0;
+    const t = title || currentCreatedLink?.title || 'Payment';
+    const n = custName || currentCreatedLink?.customer_name || '';
+
+    if (!u) { toast('No link to share.', 'error'); return; }
+
+    const msg = buildShareMessage(t, a, u, n);
+    const tgUrl = `https://t.me/share/url?url=${encodeURIComponent(u)}&text=${encodeURIComponent(msg)}`;
+    window.open(tgUrl, '_blank');
+  }
+
+  function shareToSMS(url, amount, title, phone, custName) {
+    const u = url || currentCreatedLink?.url;
+    const a = amount || currentCreatedLink?.amount || 0;
+    const t = title || currentCreatedLink?.title || 'Payment';
+    const p = (phone || currentCreatedLink?.customer_phone || '').replace(/[^0-9+]/g, '');
+    const n = custName || currentCreatedLink?.customer_name || '';
+
+    if (!u) { toast('No link to share.', 'error'); return; }
+
+    const msg = buildShareMessage(t, a, u, n);
+    const smsUrl = p ? `sms:${p}?body=${encodeURIComponent(msg)}` : `sms:?body=${encodeURIComponent(msg)}`;
+    window.location.href = smsUrl;
+  }
+
+  function shareToEmail(url, amount, title, email, custName) {
+    const u = url || currentCreatedLink?.url;
+    const a = amount || currentCreatedLink?.amount || 0;
+    const t = title || currentCreatedLink?.title || 'Payment';
+    const e = email || currentCreatedLink?.customer_email || '';
+    const n = custName || currentCreatedLink?.customer_name || '';
+
+    if (!u) { toast('No link to share.', 'error'); return; }
+
+    const msg = buildShareMessage(t, a, u, n);
+    const subject = `GreenHarvest Payment Request: ₹${parseFloat(a).toFixed(2)} - ${t}`;
+    const mailto = `mailto:${encodeURIComponent(e)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(msg)}`;
+    window.location.href = mailto;
+  }
+
+  function copyPaymentDetailsText(customLink) {
+    const l = customLink || currentCreatedLink;
+    if (!l || !l.url) {
+      toast('No link to copy details for.', 'error');
+      return;
+    }
+    const msg = buildShareMessage(l.title, l.amount, l.url, l.customer_name);
+    copyTextToClipboard(msg, 'Full payment request details copied!');
+  }
+
+  async function loadPaymentLinks(page = 1) {
+    const tableEl = document.getElementById('paymentLinksTable');
+    if (tableEl) tableEl.innerHTML = '<div class="pay-spinner"></div>';
+
+    const search = (document.getElementById('plFilterSearch')?.value || '').trim();
+    const status = document.getElementById('plFilterStatus')?.value || 'all';
+
+    const res = await apiGet('owner_get_payment_links', { search, status, page, limit: 20 });
+    if (!res || res.error) {
+      if (tableEl) tableEl.innerHTML = `<div class="pay-empty" style="color:var(--pay-red);">Failed to load payment links: ${esc(res?.error || 'Unknown error')}</div>`;
+      return;
+    }
+
+    // Update stats
+    const stats = res.stats || {};
+    setText('plStatPaidTotal', fmtCurrency(stats.paid_total || 0));
+    setText('plStatPaidCount', (stats.paid_count || 0) + ' paid links');
+    setText('plStatUnpaidCount', stats.unpaid_count || 0);
+    setText('plStatPendingReview', (stats.pending_count || 0) + ' pending review');
+    setText('plStatTotalCount', stats.total || 0);
+    setText('plStatExpiredCount', ((stats.expired_count || 0) + (stats.cancelled_count || 0)) + ' expired / cancelled');
+
+    const links = res.links || [];
+    cachedPaymentLinks = links;
+
+    if (!links.length) {
+      if (tableEl) tableEl.innerHTML = '<div class="pay-empty">No payment links found. Generate your first payment link using the form above.</div>';
+      renderPagination('paymentLinksPagination', 0, page, 20, 'PayAdmin.loadPaymentLinks');
+      return;
+    }
+
+    let html = `
+      <table class="pay-table">
+        <thead>
+          <tr>
+            <th>Link Purpose / Reference</th>
+            <th>Amount</th>
+            <th>Customer</th>
+            <th>Expiry / Created</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+
+    for (let i = 0; i < links.length; i++) {
+      const l = links[i];
+      const statusBadges = {
+        unpaid:    '<span class="pay-status-badge pay-status-initiated">Unpaid</span>',
+        paid:      '<span class="pay-status-badge pay-status-paid">✅ Paid</span>',
+        pending:   '<span class="pay-status-badge pay-status-pending">⏳ Pending</span>',
+        expired:   '<span class="pay-status-badge pay-status-expired">Expired</span>',
+        cancelled: '<span class="pay-status-badge pay-status-failed">Cancelled</span>'
+      };
+      const badge = statusBadges[l.status] || `<span class="pay-status-badge">${esc(l.status)}</span>`;
+
+      html += `
+        <tr>
+          <td>
+            <div style="font-weight:700;color:var(--pay-text);font-size:13.5px;">${esc(l.title)}</div>
+            ${l.order_ref ? `<div style="font-size:11px;color:var(--pay-text-muted);">Ref: <code>${esc(l.order_ref)}</code></div>` : ''}
+            <div style="font-size:11px;color:var(--pay-primary);font-family:monospace;margin-top:2px;">${esc(l.link_token)}</div>
+          </td>
+          <td>
+            <span style="font-size:14px;font-weight:800;color:var(--pay-primary);">${esc(l.formatted_amount)}</span>
+          </td>
+          <td>
+            <div style="font-size:13px;font-weight:600;">${esc(l.customer_name || '—')}</div>
+            ${l.customer_phone ? `<div style="font-size:11.5px;color:var(--pay-text-muted);">${esc(l.customer_phone)}</div>` : ''}
+            ${l.customer_email ? `<div style="font-size:11.5px;color:var(--pay-text-muted);">${esc(l.customer_email)}</div>` : ''}
+          </td>
+          <td>
+            <div style="font-size:12px;">${l.created_at ? fmtDate(l.created_at) : '—'}</div>
+            ${l.expires_at ? `<div style="font-size:11px;color:${l.is_expired ? 'var(--pay-red)' : 'var(--pay-text-muted)'};font-weight:${l.is_expired ? '700' : '400'};">Expires: ${fmtDate(l.expires_at)}</div>` : '<div style="font-size:11px;color:var(--pay-text-muted);">No expiry</div>'}
+          </td>
+          <td>${badge}</td>
+          <td>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <button class="pay-btn pay-btn-sm pay-btn-outline" onclick="PayAdmin.copyLinkByUrl('${esc(l.url)}')" title="Copy Public URL">
+                📋
+              </button>
+              <button class="pay-btn pay-btn-sm pay-btn-primary" onclick="PayAdmin.openShareModal(${i})" title="Share to Apps">
+                📱 Share
+              </button>
+              <a href="${esc(l.url)}" target="_blank" class="pay-btn pay-btn-sm pay-btn-outline" title="Open Customer Page" style="text-decoration:none;">
+                👁️
+              </a>
+              ${l.status === 'unpaid' ? `
+                <button class="pay-btn pay-btn-sm pay-btn-danger" onclick="PayAdmin.cancelPaymentLink(${l.id})" title="Cancel this link">
+                  ✕
+                </button>
+              ` : ''}
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    html += '</tbody></table>';
+    if (tableEl) tableEl.innerHTML = html;
+    renderPagination('paymentLinksPagination', res.total || 0, page, 20, 'PayAdmin.loadPaymentLinks');
+  }
+
+  function filterPaymentLinks() {
+    clearTimeout(plFilterTimer);
+    plFilterTimer = setTimeout(() => {
+      loadPaymentLinks(1);
+    }, 280);
+  }
+
+  async function cancelPaymentLink(linkId) {
+    if (!confirm('Are you sure you want to cancel this payment link? Customers will no longer be able to pay it.')) {
+      return;
+    }
+    const res = await apiPost('owner_cancel_payment_link', { link_id: linkId });
+    if (res && res.success) {
+      toast('Payment link cancelled.', 'success');
+      loadPaymentLinks();
+    } else {
+      toast(res?.error || 'Failed to cancel link.', 'error');
+    }
+  }
+
+  function openShareModal(index) {
+    const link = cachedPaymentLinks[index];
+    if (!link) return;
+
+    const modalHtml = `
+      <div style="padding:10px 0;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="color:var(--pay-text);font-size:18px;font-weight:800;">📱 Share Payment Link</h3>
+          <span style="font-size:18px;font-weight:900;color:var(--pay-primary);">${esc(link.formatted_amount)}</span>
+        </div>
+        <p style="font-size:13px;color:var(--pay-text-muted);margin-bottom:16px;">
+          <strong>${esc(link.title)}</strong><br>
+          ${link.customer_name ? 'Customer: ' + esc(link.customer_name) : ''}
+          ${link.order_ref ? ' · Ref: ' + esc(link.order_ref) : ''}
+        </p>
+
+        <label class="pay-label">Payment URL</label>
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <input type="text" class="pay-input" value="${esc(link.url)}" readonly style="flex:1;background:var(--pay-bg);font-family:monospace;font-size:12px;color:var(--pay-primary);">
+          <button class="pay-btn pay-btn-primary" onclick="PayAdmin.copyLinkByUrl('${esc(link.url)}')">📋 Copy</button>
+        </div>
+
+        <label class="pay-label">Direct Share via Installed Apps</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
+          <button type="button" class="pay-share-btn pay-share-whatsapp" onclick="PayAdmin.shareToWhatsApp('${esc(link.url)}', ${link.amount}, '${esc(link.title)}', '${esc(link.customer_phone || '')}', '${esc(link.customer_name || '')}')">
+            💬 WhatsApp
+          </button>
+          <button type="button" class="pay-share-btn pay-share-telegram" onclick="PayAdmin.shareToTelegram('${esc(link.url)}', ${link.amount}, '${esc(link.title)}', '${esc(link.customer_name || '')}')">
+            ✈️ Telegram
+          </button>
+          <button type="button" class="pay-share-btn pay-share-sms" onclick="PayAdmin.shareToSMS('${esc(link.url)}', ${link.amount}, '${esc(link.title)}', '${esc(link.customer_phone || '')}', '${esc(link.customer_name || '')}')">
+            ✉️ SMS
+          </button>
+          <button type="button" class="pay-share-btn pay-share-gmail" onclick="PayAdmin.shareToEmail('${esc(link.url)}', ${link.amount}, '${esc(link.title)}', '${esc(link.customer_email || '')}', '${esc(link.customer_name || '')}')">
+            📧 Gmail / Email
+          </button>
+        </div>
+
+        <button type="button" class="pay-btn pay-btn-outline" onclick="PayAdmin.copyPaymentDetailsText(${JSON.stringify(link).replace(/"/g, '&quot;')})" style="width:100%;margin-bottom:12px;">
+          📄 Copy Full Details (With Instructions)
+        </button>
+
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="pay-btn pay-btn-outline" onclick="PayAdmin.closeModal()">Close</button>
+        </div>
+      </div>
+    `;
+
+    openModal(modalHtml);
+  }
+
   // ─── Init ────────────────────────────────────────────────────────────────
 
   function init() {
@@ -739,7 +1153,21 @@ const PayAdmin = (function() {
     uploadQr,
     toggleProviderFields,
     openModal,
-    closeModal
+    closeModal,
+    // Payment Links
+    submitCreatePaymentLink,
+    copyGeneratedLink,
+    copyLinkByUrl,
+    shareNativeLink,
+    shareToWhatsApp,
+    shareToTelegram,
+    shareToSMS,
+    shareToEmail,
+    copyPaymentDetailsText,
+    loadPaymentLinks,
+    filterPaymentLinks,
+    cancelPaymentLink,
+    openShareModal
   };
 
 })();

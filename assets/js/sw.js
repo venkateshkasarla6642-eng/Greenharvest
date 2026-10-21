@@ -24,6 +24,7 @@ const NO_CACHE_PATTERNS = [
   /\/api\.php/,
   /\/seed\.php/,
   /\/pay\/api\.php/,
+  /\/pay\/link\.php/,
   /\/pay\/webhook\.php/,
   /action=/,
   /token=/,

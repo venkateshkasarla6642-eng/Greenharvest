@@ -784,6 +784,63 @@ table.pay-table tr:hover td { background: rgba(255,255,255,0.02); }
   padding: 12px 16px;
 }
 
+/* ─── Payment Links Layout & App Share Buttons ─────────── */
+.pay-link-create-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.2fr) minmax(300px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .pay-link-create-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pay-share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: var(--pay-radius-sm);
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.pay-share-btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.pay-share-btn:active {
+  transform: translateY(0);
+}
+
+.pay-share-whatsapp {
+  background: linear-gradient(135deg, #25D366, #128C7E);
+}
+
+.pay-share-telegram {
+  background: linear-gradient(135deg, #0088cc, #0077b5);
+}
+
+.pay-share-sms {
+  background: linear-gradient(135deg, #475569, #334155);
+}
+
+.pay-share-gmail {
+  background: linear-gradient(135deg, #ea4335, #c5221f);
+}
+
 /* ─── Mobile responsive ────────────────────────────────────────── */
 @media (max-width: 768px) {
   .pay-sidebar {

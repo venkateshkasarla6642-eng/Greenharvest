@@ -51,15 +51,19 @@ class PaymentService {
         try {
             $exists = $this->db->query("SELECT 1 FROM information_schema.tables WHERE table_name = 'gh_pay_settings'")->fetchColumn();
             if (!$exists) {
-                $this->runMigration();
+                $this->runMigration(__DIR__ . '/../migrations/001_greenharvest_pay.sql');
+            }
+            $linksExists = $this->db->query("SELECT 1 FROM information_schema.tables WHERE table_name = 'gh_payment_links'")->fetchColumn();
+            if (!$linksExists) {
+                $this->runMigration(__DIR__ . '/../migrations/002_payment_links.sql');
             }
         } catch (\Throwable $e) {
             error_log('[GHPay] ensureSchema check error: ' . $e->getMessage());
         }
     }
 
-    private function runMigration(): void {
-        $file = __DIR__ . '/../migrations/001_greenharvest_pay.sql';
+    private function runMigration(string $file = ''): void {
+        if (empty($file)) $file = __DIR__ . '/../migrations/001_greenharvest_pay.sql';
         if (!file_exists($file)) return;
         $sql = file_get_contents($file);
 
@@ -826,5 +830,383 @@ class PaymentService {
         );
         $stmt->execute();
         return $stmt->rowCount();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PAYMENT LINKS (Shareable Payment Requests)
+    // ════════════════════════════════════════════════════════════════════════
+
+    public function buildPaymentLinkUrl(string $token): string {
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
+            $proto = $_SERVER['HTTP_X_FORWARDED_PROTO'];
+        }
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $scriptDir = dirname($_SERVER['SCRIPT_NAME'] ?? '');
+        $payDir = rtrim(str_replace('\\', '/', $scriptDir), '/');
+        if (!str_ends_with($payDir, '/pay')) {
+            $payDir = rtrim($payDir, '/') . '/pay';
+        }
+        return "$proto://$host$payDir/link.php?token=" . urlencode($token);
+    }
+
+    public function createPaymentLink(array $data, int $userId): array {
+        $title = trim($data['title'] ?? '');
+        if (empty($title) || mb_strlen($title) < 2) {
+            return ['success' => false, 'error' => 'Payment title or purpose is required (min 2 characters).'];
+        }
+        if (mb_strlen($title) > 255) {
+            $title = mb_substr($title, 0, 255);
+        }
+
+        $amount = round(floatval($data['amount'] ?? 0), 2);
+        if ($amount <= 0) {
+            return ['success' => false, 'error' => 'Please enter a valid amount greater than ₹0.00.'];
+        }
+        if ($amount > 100000) {
+            return ['success' => false, 'error' => 'Maximum allowed payment link amount is ₹1,00,000.00.'];
+        }
+
+        $customerName  = trim($data['customer_name'] ?? '');
+        $customerPhone = trim($data['customer_phone'] ?? '');
+        $customerEmail = trim($data['customer_email'] ?? '');
+        $orderRef      = trim($data['order_ref'] ?? '');
+        $description   = trim($data['description'] ?? '');
+
+        // Expiration calculation
+        $expiresAt = null;
+        if (!empty($data['expires_at'])) {
+            $ts = strtotime($data['expires_at']);
+            if ($ts && $ts > time()) {
+                $expiresAt = date('Y-m-d H:i:s', $ts);
+            }
+        } elseif (!empty($data['expires_in'])) {
+            $seconds = match ($data['expires_in']) {
+                '1h'    => 3600,
+                '6h'    => 21600,
+                '12h'   => 43200,
+                '24h'   => 86400,
+                '3d'    => 259200,
+                '7d'    => 604800,
+                '30d'   => 2592000,
+                default => null
+            };
+            if ($seconds !== null) {
+                $expiresAt = date('Y-m-d H:i:s', time() + $seconds);
+            }
+        }
+
+        // Generate unguessable, cryptographically secure token
+        $token = 'gpl_' . bin2hex(random_bytes(16));
+
+        try {
+            $stmt = $this->db->prepare(
+                "INSERT INTO gh_payment_links
+                 (link_token, title, description, amount, customer_name, customer_phone, customer_email, order_ref, status, expires_at, created_by_user_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?)"
+            );
+            $stmt->execute([
+                $token,
+                $title,
+                $description ?: null,
+                $amount,
+                $customerName ?: null,
+                $customerPhone ?: null,
+                $customerEmail ?: null,
+                $orderRef ?: null,
+                $expiresAt,
+                $userId ?: null
+            ]);
+            $linkId = (int)$this->db->lastInsertId();
+
+            $this->audit->log('payment_link_created', [
+                'link_id'   => $linkId,
+                'token'     => $token,
+                'title'     => $title,
+                'amount'    => $amount,
+                'order_ref' => $orderRef
+            ], $userId, 'payment_link', $linkId);
+
+            $url = $this->buildPaymentLinkUrl($token);
+
+            return [
+                'success' => true,
+                'message' => 'Payment link created successfully.',
+                'link'    => [
+                    'id'               => $linkId,
+                    'token'            => $token,
+                    'url'              => $url,
+                    'title'            => $title,
+                    'description'      => $description,
+                    'amount'           => $amount,
+                    'formatted_amount' => '₹' . number_format($amount, 2),
+                    'customer_name'    => $customerName,
+                    'customer_phone'   => $customerPhone,
+                    'customer_email'   => $customerEmail,
+                    'order_ref'        => $orderRef,
+                    'status'           => 'unpaid',
+                    'expires_at'       => $expiresAt,
+                    'created_at'       => date('Y-m-d H:i:s')
+                ]
+            ];
+        } catch (\Throwable $e) {
+            error_log('[GHPay] createPaymentLink error: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'Failed to create payment link. Please try again.'];
+        }
+    }
+
+    public function getPaymentLinks(array $filters = [], int $limit = 25, int $offset = 0): array {
+        // Auto-mark expired
+        try {
+            $this->db->exec(
+                "UPDATE gh_payment_links
+                 SET status = 'expired', updated_at = NOW()
+                 WHERE status = 'unpaid'
+                   AND expires_at IS NOT NULL
+                   AND expires_at < NOW()"
+            );
+        } catch (\Throwable $e) {}
+
+        $where = [];
+        $params = [];
+
+        if (!empty($filters['status']) && $filters['status'] !== 'all') {
+            $where[] = 'l.status = ?';
+            $params[] = $filters['status'];
+        }
+
+        if (!empty($filters['search'])) {
+            $s = '%' . $filters['search'] . '%';
+            $where[] = '(l.title ILIKE ? OR l.customer_name ILIKE ? OR l.customer_phone ILIKE ? OR l.order_ref ILIKE ? OR l.link_token ILIKE ?)';
+            $params[] = $s;
+            $params[] = $s;
+            $params[] = $s;
+            $params[] = $s;
+            $params[] = $s;
+        }
+
+        $whereClause = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        // Count total matching
+        $countStmt = $this->db->prepare("SELECT COUNT(*) FROM gh_payment_links l $whereClause");
+        $countStmt->execute($params);
+        $totalCount = (int)$countStmt->fetchColumn();
+
+        // Overall stats
+        $stats = [
+            'total'          => 0,
+            'paid_count'     => 0,
+            'paid_total'     => 0.0,
+            'unpaid_count'   => 0,
+            'pending_count'  => 0,
+            'expired_count'  => 0,
+            'cancelled_count'=> 0
+        ];
+        try {
+            $sStmt = $this->db->query(
+                "SELECT
+                   COUNT(*) as total,
+                   COUNT(CASE WHEN status = 'paid' THEN 1 END) as paid_count,
+                   COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) as paid_total,
+                   COUNT(CASE WHEN status = 'unpaid' THEN 1 END) as unpaid_count,
+                   COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_count,
+                   COUNT(CASE WHEN status = 'expired' THEN 1 END) as expired_count,
+                   COUNT(CASE WHEN status = 'cancelled' THEN 1 END) as cancelled_count
+                 FROM gh_payment_links"
+            );
+            $sRow = $sStmt->fetch();
+            if ($sRow) {
+                $stats['total']           = (int)$sRow['total'];
+                $stats['paid_count']      = (int)$sRow['paid_count'];
+                $stats['paid_total']      = (float)$sRow['paid_total'];
+                $stats['unpaid_count']    = (int)$sRow['unpaid_count'];
+                $stats['pending_count']   = (int)$sRow['pending_count'];
+                $stats['expired_count']   = (int)$sRow['expired_count'];
+                $stats['cancelled_count'] = (int)$sRow['cancelled_count'];
+            }
+        } catch (\Throwable $e) {}
+
+        // Fetch rows
+        $sql = "SELECT l.*, u.name as creator_name
+                FROM gh_payment_links l
+                LEFT JOIN users u ON l.created_by_user_id = u.id
+                $whereClause
+                ORDER BY l.id DESC
+                LIMIT ? OFFSET ?";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute(array_merge($params, [$limit, $offset]));
+        $rows = $stmt->fetchAll();
+
+        foreach ($rows as &$r) {
+            $r['amount']           = (float)$r['amount'];
+            $r['formatted_amount'] = '₹' . number_format($r['amount'], 2);
+            $r['url']              = $this->buildPaymentLinkUrl($r['link_token']);
+            $r['is_expired']       = !empty($r['expires_at']) && (strtotime($r['expires_at']) < time());
+        }
+
+        return [
+            'success'     => true,
+            'links'       => $rows,
+            'total'       => $totalCount,
+            'stats'       => $stats,
+            'limit'       => $limit,
+            'offset'      => $offset
+        ];
+    }
+
+    public function getPaymentLinkByToken(string $token): ?array {
+        $token = preg_replace('/[^a-zA-Z0-9_\-]/', '', $token);
+        if (empty($token)) return null;
+
+        $stmt = $this->db->prepare("SELECT * FROM gh_payment_links WHERE link_token = ?");
+        $stmt->execute([$token]);
+        $link = $stmt->fetch();
+        if (!$link) return null;
+
+        // Auto-expire check
+        if ($link['status'] === 'unpaid' && !empty($link['expires_at']) && strtotime($link['expires_at']) < time()) {
+            $this->db->prepare("UPDATE gh_payment_links SET status = 'expired', updated_at = NOW() WHERE id = ?")->execute([$link['id']]);
+            $link['status'] = 'expired';
+        }
+
+        $link['amount']           = (float)$link['amount'];
+        $link['formatted_amount'] = '₹' . number_format($link['amount'], 2);
+        $link['url']              = $this->buildPaymentLinkUrl($link['link_token']);
+        $link['is_expired']       = !empty($link['expires_at']) && (strtotime($link['expires_at']) < time());
+
+        return $link;
+    }
+
+    public function cancelPaymentLink(int $linkId, int $userId): array {
+        $stmt = $this->db->prepare("SELECT * FROM gh_payment_links WHERE id = ? FOR UPDATE");
+        $this->db->beginTransaction();
+        try {
+            $stmt->execute([$linkId]);
+            $link = $stmt->fetch();
+            if (!$link) {
+                $this->db->rollBack();
+                return ['success' => false, 'error' => 'Payment link not found.'];
+            }
+            if ($link['status'] === 'paid') {
+                $this->db->rollBack();
+                return ['success' => false, 'error' => 'Cannot cancel an already paid payment link.'];
+            }
+            if ($link['status'] === 'cancelled') {
+                $this->db->rollBack();
+                return ['success' => true, 'message' => 'Link was already cancelled.'];
+            }
+
+            $upd = $this->db->prepare("UPDATE gh_payment_links SET status = 'cancelled', updated_at = NOW() WHERE id = ?");
+            $upd->execute([$linkId]);
+            $this->db->commit();
+
+            $this->audit->log('payment_link_cancelled', [
+                'link_id' => $linkId,
+                'token'   => $link['link_token'],
+                'amount'  => $link['amount']
+            ], $userId, 'payment_link', $linkId);
+
+            return ['success' => true, 'message' => 'Payment link cancelled successfully.'];
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            error_log('[GHPay] cancelPaymentLink error: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'Failed to cancel payment link.'];
+        }
+    }
+
+    public function verifyPaymentLink(
+        string  $token,
+        string  $method,
+        string  $status         = 'paid',
+        string  $txRef          = '',
+        string  $utr            = '',
+        ?string $screenshotPath = null,
+        int     $verifierUserId = 0
+    ): array {
+        $token = preg_replace('/[^a-zA-Z0-9_\-]/', '', $token);
+        if (empty($token)) {
+            return ['success' => false, 'error' => 'Invalid payment token.'];
+        }
+
+        $stmt = $this->db->prepare("SELECT * FROM gh_payment_links WHERE link_token = ? FOR UPDATE");
+        $this->db->beginTransaction();
+        try {
+            $stmt->execute([$token]);
+            $link = $stmt->fetch();
+
+            if (!$link) {
+                $this->db->rollBack();
+                return ['success' => false, 'error' => 'Payment link not found.'];
+            }
+
+            // Already paid idempotency
+            if ($link['status'] === 'paid') {
+                $this->db->rollBack();
+                return [
+                    'success'          => true,
+                    'already_paid'     => true,
+                    'status'           => 'paid',
+                    'transaction_ref'  => $link['transaction_ref'],
+                    'paid_at'          => $link['paid_at']
+                ];
+            }
+
+            if ($link['status'] === 'cancelled') {
+                $this->db->rollBack();
+                return ['success' => false, 'error' => 'This payment link has been cancelled.'];
+            }
+
+            if ($link['status'] === 'expired' || (!empty($link['expires_at']) && strtotime($link['expires_at']) < time())) {
+                $this->db->rollBack();
+                return ['success' => false, 'error' => 'This payment link has expired.'];
+            }
+
+            $newStatus = in_array($status, ['paid', 'pending', 'failed', 'cancelled'], true) ? $status : 'paid';
+
+            $upd = $this->db->prepare(
+                "UPDATE gh_payment_links
+                 SET status          = ?,
+                     payment_method  = ?,
+                     transaction_ref = COALESCE(?, transaction_ref),
+                     utr_reference   = COALESCE(?, utr_reference),
+                     screenshot_path = COALESCE(?, screenshot_path),
+                     paid_at         = CASE WHEN ? = 'paid' THEN NOW() ELSE paid_at END,
+                     updated_at      = NOW()
+                 WHERE id = ?"
+            );
+            $upd->execute([
+                $newStatus,
+                $method,
+                $txRef ?: null,
+                $utr ?: null,
+                $screenshotPath ?: null,
+                $newStatus,
+                $link['id']
+            ]);
+
+            $this->db->commit();
+
+            $this->audit->log('payment_link_' . $newStatus, [
+                'link_id'         => $link['id'],
+                'token'           => $token,
+                'amount'          => $link['amount'],
+                'method'          => $method,
+                'transaction_ref' => $txRef,
+                'utr'             => $utr
+            ], $verifierUserId, 'payment_link', $link['id']);
+
+            return [
+                'success'         => true,
+                'status'          => $newStatus,
+                'message'         => ($newStatus === 'paid') ? 'Payment confirmed successfully.' : 'Payment submitted for verification.',
+                'transaction_ref' => $txRef ?: $token,
+                'amount'          => (float)$link['amount']
+            ];
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            error_log('[GHPay] verifyPaymentLink error: ' . $e->getMessage());
+            return ['success' => false, 'error' => 'Verification failed. Please try again.'];
+        }
     }
 }

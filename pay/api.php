@@ -110,6 +110,117 @@ switch ($action) {
         jsonResponse($pub);
         break;
 
+    /**
+     * Public payment link details.
+     * Safe to call on customer payment page; never exposes private keys.
+     * GET: token
+     */
+    case 'get_public_payment_link':
+        $token = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_GET['token'] ?? '');
+        if (empty($token)) {
+            jsonResponse(['error' => 'Missing payment link token.'], 400);
+        }
+
+        $link = $payService->getPaymentLinkByToken($token);
+        if (!$link) {
+            jsonResponse(['error' => 'Payment link not found.'], 404);
+        }
+
+        $pub = $payService->getPublicSettings();
+        jsonResponse([
+            'success'  => true,
+            'link'     => [
+                'token'            => $link['link_token'],
+                'title'            => $link['title'],
+                'description'      => $link['description'],
+                'amount'           => $link['amount'],
+                'formatted_amount' => $link['formatted_amount'],
+                'customer_name'    => $link['customer_name'],
+                'order_ref'        => $link['order_ref'],
+                'status'           => $link['status'],
+                'expires_at'       => $link['expires_at'],
+                'is_expired'       => $link['is_expired'],
+                'paid_at'          => $link['paid_at'],
+                'transaction_ref'  => $link['transaction_ref']
+            ],
+            'settings' => $pub
+        ]);
+        break;
+
+    /**
+     * Customer executes payment for a payment link.
+     * POST: token, method, outcome, utr_reference
+     */
+    case 'pay_payment_link':
+        $token = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_POST['token'] ?? '');
+        if (empty($token)) {
+            jsonResponse(['error' => 'Missing payment link token.'], 400);
+        }
+
+        $method = trim($_POST['method'] ?? 'sandbox');
+        $allowed = ['sandbox', 'qr_upi', 'cod', 'live_upi', 'live_card', 'live_netbanking'];
+        if (!in_array($method, $allowed, true)) {
+            jsonResponse(['error' => 'Invalid payment method.'], 400);
+        }
+
+        $link = $payService->getPaymentLinkByToken($token);
+        if (!$link) {
+            jsonResponse(['error' => 'Payment link not found.'], 404);
+        }
+        if ($link['status'] === 'paid') {
+            jsonResponse(['success' => true, 'already_paid' => true, 'message' => 'Payment already completed.']);
+        }
+        if ($link['status'] === 'cancelled') {
+            jsonResponse(['error' => 'This payment link has been cancelled.'], 400);
+        }
+        if ($link['status'] === 'expired' || !empty($link['is_expired'])) {
+            jsonResponse(['error' => 'This payment link has expired.'], 400);
+        }
+
+        // Handle QR screenshot upload if submitted
+        $screenshotPath = null;
+        if (isset($_FILES['screenshot']) && $_FILES['screenshot']['error'] === UPLOAD_ERR_OK) {
+            $file = $_FILES['screenshot'];
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+            if (in_array($mime, ['image/jpeg', 'image/png', 'image/webp'])) {
+                $ext = explode('/', $mime)[1];
+                $dir = __DIR__ . '/../uploads/pay_qr/';
+                if (!is_dir($dir)) mkdir($dir, 0750, true);
+                $fn = 'link_qr_' . bin2hex(random_bytes(8)) . '_' . time() . '.' . $ext;
+                if (move_uploaded_file($file['tmp_name'], $dir . $fn)) {
+                    $screenshotPath = 'uploads/pay_qr/' . $fn;
+                }
+            }
+        }
+
+        $utr = trim($_POST['utr_reference'] ?? '');
+        $outcome = trim($_POST['outcome'] ?? 'paid');
+        $txRef = 'GPL-TX-' . strtoupper(bin2hex(random_bytes(6)));
+
+        if ($method === 'sandbox') {
+            $status = ($outcome === 'paid') ? 'paid' : (($outcome === 'failed') ? 'failed' : 'pending');
+            $res = $payService->verifyPaymentLink($token, 'sandbox', $status, $txRef, '', null, $user['id'] ?? 0);
+            jsonResponse($res, $res['success'] ? 200 : 400);
+        } elseif ($method === 'qr_upi') {
+            if (empty($utr) || strlen($utr) < 6) {
+                jsonResponse(['error' => 'Please provide a valid UTR / Transaction Reference ID (min 6 characters).'], 400);
+            }
+            $res = $payService->verifyPaymentLink($token, 'qr_upi', 'pending', $txRef, $utr, $screenshotPath, $user['id'] ?? 0);
+            jsonResponse($res, $res['success'] ? 200 : 400);
+        } elseif ($method === 'cod') {
+            $res = $payService->verifyPaymentLink($token, 'cod', 'pending', $txRef, 'COD', null, $user['id'] ?? 0);
+            jsonResponse($res, $res['success'] ? 200 : 400);
+        } elseif ($payService->isLiveMode()) {
+            $razorpayPaymentId = trim($_POST['razorpay_payment_id'] ?? '');
+            $res = $payService->verifyPaymentLink($token, $method, 'paid', $razorpayPaymentId ?: $txRef, '', null, $user['id'] ?? 0);
+            jsonResponse($res, $res['success'] ? 200 : 400);
+        } else {
+            jsonResponse(['error' => 'Payment method not currently available.'], 400);
+        }
+        break;
+
     // ════════════════════════════════════════════════════════════════════════
     // CUSTOMER ACTIONS
     // ════════════════════════════════════════════════════════════════════════
@@ -346,6 +457,56 @@ switch ($action) {
         }
 
         jsonResponse(['success' => true, 'transactions' => $rows, 'page' => $page]);
+        break;
+
+    /**
+     * Create payment link (Admin / Owner).
+     * POST: title, amount, customer_name, customer_phone, customer_email, order_ref, description, expires_in, expires_at
+     */
+    case 'owner_create_payment_link':
+        $owner = payRequireOwner();
+        payVerifyCsrf();
+        payRateLimit('create_link_' . $owner['id'], 30);
+
+        $result = $payService->createPaymentLink($_POST, (int)$owner['id']);
+        jsonResponse($result, $result['success'] ? 200 : 400);
+        break;
+
+    /**
+     * List payment links with filters and pagination.
+     * GET: status, search, page, limit
+     */
+    case 'owner_get_payment_links':
+        payRequireOwner();
+
+        $filters = [
+            'status' => trim($_GET['status'] ?? 'all'),
+            'search' => trim($_GET['search'] ?? '')
+        ];
+        $page = max(1, intval($_GET['page'] ?? 1));
+        $limit = max(1, min(100, intval($_GET['limit'] ?? 25)));
+        $offset = ($page - 1) * $limit;
+
+        $result = $payService->getPaymentLinks($filters, $limit, $offset);
+        $result['page'] = $page;
+        jsonResponse($result);
+        break;
+
+    /**
+     * Cancel an unpaid payment link.
+     * POST: link_id
+     */
+    case 'owner_cancel_payment_link':
+        $owner = payRequireOwner();
+        payVerifyCsrf();
+
+        $linkId = intval($_POST['link_id'] ?? 0);
+        if ($linkId <= 0) {
+            jsonResponse(['error' => 'Invalid link ID.'], 400);
+        }
+
+        $result = $payService->cancelPaymentLink($linkId, (int)$owner['id']);
+        jsonResponse($result, $result['success'] ? 200 : 400);
         break;
 
     /**
