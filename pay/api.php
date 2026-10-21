@@ -21,7 +21,7 @@ function payRequireOwner(): array {
     if (!$user) {
         jsonResponse(['error' => 'Authentication required.'], 401);
     }
-    if ($user['role'] !== 'owner') {
+    if ($user['role'] !== 'owner' && $user['role'] !== 'shopkeeper') {
         jsonResponse(['error' => 'Access denied. Owner account required.'], 403);
     }
     return $user;
@@ -202,7 +202,7 @@ switch ($action) {
         if (!$attempt) {
             jsonResponse(['error' => 'Payment attempt not found.'], 404);
         }
-        if ((int)$attempt['customer_id'] !== (int)$u['id'] && $u['role'] !== 'owner') {
+        if ((int)$attempt['customer_id'] !== (int)$u['id'] && !in_array($u['role'], ['owner', 'shopkeeper'])) {
             jsonResponse(['error' => 'Unauthorized.'], 403);
         }
 
@@ -620,7 +620,7 @@ switch ($action) {
      */
     case 'sandbox_simulate':
         $u = payRequireAuth();
-        if (!in_array($u['role'], ['owner', 'customer'])) {
+        if (!in_array($u['role'], ['owner', 'shopkeeper', 'customer'])) {
             jsonResponse(['error' => 'Unauthorized.'], 403);
         }
 

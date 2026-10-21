@@ -2870,6 +2870,41 @@ const App = (() => {
         </button>
       </div>
 
+      <!-- GREENHARVEST PAY GATEWAY CONTROL BAR -->
+      <div class="bg-card" style="margin-bottom:20px; border-radius:12px; border:1.5px solid #a7f3d0; background:linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%); padding:14px 18px; box-shadow:0 2px 8px rgba(16,185,129,0.06);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="width:40px; height:40px; border-radius:10px; background:#10b981; color:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; box-shadow:0 2px 6px rgba(16,185,129,0.3);">
+              💳
+            </div>
+            <div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <strong style="font-size:15px; color:#065f46;">GreenHarvest Pay Gateway</strong>
+                <span id="ghPayModeBadge" style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd;">
+                  ⏳ Checking...
+                </span>
+              </div>
+              <p class="text-xs text-muted" style="margin:2px 0 0 0;">
+                Online checkout gateway &bull; Razorpay, Cashfree, UPI &amp; QR verification
+              </p>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <div style="display:inline-flex; border:1px solid #d1d5db; border-radius:8px; overflow:hidden;">
+              <button type="button" id="ghPayModeBtnSandbox" onclick="App.togglePayMode('sandbox')" style="padding:6px 12px; font-size:12px; font-weight:700; border:none; cursor:pointer; background:#f3f4f6; color:#4b5563;">
+                🧪 Sandbox
+              </button>
+              <button type="button" id="ghPayModeBtnLive" onclick="App.togglePayMode('live')" style="padding:6px 12px; font-size:12px; font-weight:700; border:none; cursor:pointer; background:#ffffff; color:#9ca3af;">
+                🔴 Live
+              </button>
+            </div>
+            <a href="pay/admin.php" class="role-btn" style="text-decoration:none; display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:700; padding:6px 14px; border-radius:8px; background:#059669; color:#fff; border-color:#059669;">
+              ⚙️ Pay Admin ↗
+            </a>
+          </div>
+        </div>
+      </div>
+
       <!-- SEVEN COMPACT SUMMARY CARDS -->
       <div id="statsGrid" class="stats-grid shopkeeper-summary-grid">
         <div class="stat-card" id="sc0" onclick="App.setShopOrderCategory('today')" title="View today's orders">
@@ -2939,6 +2974,7 @@ const App = (() => {
     `;
 
     renderSideMenu();
+    loadShopkeeperPayStatus();
     await loadShopStats();
     await loadShopOrders();
     updateCartBadge();
@@ -4097,7 +4133,67 @@ const App = (() => {
         </div>
         <button type="submit" class="btn-primary">Save Settings</button>
       </form>
+
+      <!-- GREENHARVEST PAY GATEWAY & LIVE PROCESSING MANAGEMENT -->
+      <div class="bg-card" style="margin-top:24px; border:1.5px solid #10b981; border-radius:12px; background:linear-gradient(180deg, #f0fdf4 0%, #ffffff 120px); padding:20px 24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; border-bottom:1px solid #d1fae5; padding-bottom:14px; margin-bottom:18px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="width:44px; height:44px; border-radius:10px; background:#10b981; color:#fff; display:flex; align-items:center; justify-content:center; font-size:22px; box-shadow:0 3px 8px rgba(16,185,129,0.3);">
+              💳
+            </div>
+            <div>
+              <h3 style="font-size:18px; font-weight:800; color:#065f46; margin:0;">GreenHarvest Pay — Gateway Control</h3>
+              <p class="text-xs text-muted" style="margin:2px 0 0 0;">Manage checkout gateway mode, live payment providers, and credentials</p>
+            </div>
+          </div>
+          <a href="pay/admin.php" class="btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:700; padding:9px 18px; border-radius:8px; background:#059669; color:#fff;">
+            ⚙️ Open Full Pay Admin (/pay/admin.php) ↗
+          </a>
+        </div>
+
+        <div style="background:#ffffff; border:1px solid #e5e7eb; border-radius:10px; padding:16px; margin-bottom:18px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div style="font-size:12px; font-weight:700; text-transform:uppercase; color:#6b7280; letter-spacing:0.5px;">Current Gateway Mode</div>
+              <div id="ghPaySettingsModeBadge" style="font-size:16px; margin-top:4px;">
+                <span style="color:#6b7280;">Loading gateway status...</span>
+              </div>
+              <div id="ghPayProviderInfo" style="font-size:12px; color:#6b7280; margin-top:3px;"></div>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" id="ghSetBtnSandbox" onclick="App.togglePayMode('sandbox')" style="padding:8px 16px; font-size:13px; font-weight:700; border-radius:8px; border:1px solid #d1d5db; background:#f3f4f6; color:#374151; cursor:pointer;">
+                🧪 Switch to Sandbox (Test)
+              </button>
+              <button type="button" id="ghSetBtnLive" onclick="App.togglePayMode('live')" style="padding:8px 16px; font-size:13px; font-weight:700; border-radius:8px; border:1px solid #d1d5db; background:#f3f4f6; color:#374151; cursor:pointer;">
+                🔴 Switch to Live (Real Payments)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Render Live Payment Processing Guide -->
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px;">
+          <h4 style="font-size:14px; font-weight:800; color:#1e293b; margin:0 0 8px 0; display:flex; align-items:center; gap:6px;">
+            <span>🚀</span> Next Steps for Live Payment Processing (Render Deployment)
+          </h4>
+          <p style="font-size:12.5px; color:#475569; margin:0 0 10px 0; line-height:1.5;">
+            To process real money via Razorpay or Cashfree, add these environment variables in your <strong>Render Dashboard &gt; Environment</strong>:
+          </p>
+          <div style="background:#1e293b; color:#e2e8f0; border-radius:8px; padding:12px 14px; font-family:monospace; font-size:12px; line-height:1.6; overflow-x:auto;">
+            <div><span style="color:#38bdf8;">GH_PAY_MODE</span>=<span style="color:#4ade80;">live</span></div>
+            <div><span style="color:#38bdf8;">GH_LIVE_PROVIDER</span>=<span style="color:#4ade80;">razorpay</span> <span style="color:#94a3b8;"># or cashfree</span></div>
+            <div><span style="color:#38bdf8;">GH_LIVE_KEY_ID</span>=<span style="color:#fde047;">rzp_live_your_key_id</span></div>
+            <div><span style="color:#38bdf8;">GH_LIVE_KEY_SECRET</span>=<span style="color:#fde047;">your_live_key_secret</span></div>
+            <div><span style="color:#38bdf8;">GH_WEBHOOK_SECRET</span>=<span style="color:#fde047;">your_webhook_secret</span></div>
+          </div>
+          <div style="margin-top:10px; font-size:12px; color:#64748b;">
+            Webhook Endpoint URL: <code style="background:#e2e8f0; padding:2px 6px; border-radius:4px; font-weight:700; color:#0f172a;">${window.location.origin}/pay/webhook.php</code>
+          </div>
+        </div>
+      </div>
     `;
+
+    loadShopkeeperPayStatus();
 
     qs('#settingsForm').onsubmit = async (e) => {
       e.preventDefault();
@@ -4119,6 +4215,106 @@ const App = (() => {
       state.settings.shop_status = newStatus;
       toast(`Shop is now ${newStatus} ${newStatus==='OPEN'?'🟢':'🔴'}`);
       renderShopkeeperView();
+    }
+  }
+
+  // ─── GREENHARVEST PAY GATEWAY ADMIN STATUS & MODE TOGGLE ─────────────────
+  async function loadShopkeeperPayStatus() {
+    try {
+      const res = await api('get_pay_gateway_status');
+      if (!res || !res.gateway) return;
+      const gw = res.gateway;
+      const isLive = (gw.mode === 'live');
+
+      // Update Dashboard elements if present
+      const badge = qs('#ghPayModeBadge');
+      if (badge) {
+        if (isLive) {
+          badge.textContent = '🔴 LIVE MODE';
+          badge.style.background = '#fee2e2';
+          badge.style.color = '#991b1b';
+          badge.style.borderColor = '#fca5a5';
+        } else {
+          badge.textContent = '🧪 SANDBOX (TEST MODE)';
+          badge.style.background = '#dbeafe';
+          badge.style.color = '#1e40af';
+          badge.style.borderColor = '#93c5fd';
+        }
+      }
+
+      const btnSandbox = qs('#ghPayModeBtnSandbox');
+      const btnLive = qs('#ghPayModeBtnLive');
+      if (btnSandbox && btnLive) {
+        if (isLive) {
+          btnLive.style.background = '#ef4444';
+          btnLive.style.color = '#ffffff';
+          btnSandbox.style.background = '#ffffff';
+          btnSandbox.style.color = '#4b5563';
+        } else {
+          btnSandbox.style.background = '#2563eb';
+          btnSandbox.style.color = '#ffffff';
+          btnLive.style.background = '#ffffff';
+          btnLive.style.color = '#4b5563';
+        }
+      }
+
+      // Update Settings elements if present
+      const setBadge = qs('#ghPaySettingsModeBadge');
+      if (setBadge) {
+        if (isLive) {
+          setBadge.innerHTML = '<span style="color:#b91c1c; font-weight:800;">🔴 LIVE (Production Mode)</span>';
+        } else {
+          setBadge.innerHTML = '<span style="color:#1d4ed8; font-weight:800;">🧪 SANDBOX (Test Mode — Safe)</span>';
+        }
+      }
+
+      const setBtnSandbox = qs('#ghSetBtnSandbox');
+      const setBtnLive = qs('#ghSetBtnLive');
+      if (setBtnSandbox && setBtnLive) {
+        if (isLive) {
+          setBtnLive.style.background = '#ef4444';
+          setBtnLive.style.color = '#ffffff';
+          setBtnLive.style.borderColor = '#ef4444';
+          setBtnSandbox.style.background = '#f3f4f6';
+          setBtnSandbox.style.color = '#374151';
+          setBtnSandbox.style.borderColor = '#d1d5db';
+        } else {
+          setBtnSandbox.style.background = '#2563eb';
+          setBtnSandbox.style.color = '#ffffff';
+          setBtnSandbox.style.borderColor = '#2563eb';
+          setBtnLive.style.background = '#f3f4f6';
+          setBtnLive.style.color = '#374151';
+          setBtnLive.style.borderColor = '#d1d5db';
+        }
+      }
+
+      const provText = qs('#ghPayProviderInfo');
+      if (provText) {
+        const provName = gw.live_provider && gw.live_provider !== 'none' ? gw.live_provider.toUpperCase() : 'None configured (QR/UPI manual)';
+        const keyStatus = gw.has_live_keys ? '✅ Render Env Keys Active' : '⚠️ Keys not detected in env';
+        provText.textContent = `${provName} • ${keyStatus}`;
+      }
+    } catch (e) {
+      console.warn('[GH Pay Status Error]', e);
+    }
+  }
+
+  async function togglePayMode(targetMode) {
+    if (targetMode === 'live') {
+      const ok = confirm('⚠️ Switch GreenHarvest Pay to LIVE mode?\n\nReal customer payments will be collected. Make sure your Render environment variables (GH_PAY_MODE=live, GH_LIVE_PROVIDER, GH_LIVE_KEY_ID, GH_LIVE_KEY_SECRET, GH_WEBHOOK_SECRET) are configured.');
+      if (!ok) return;
+    }
+
+    try {
+      const res = await api('toggle_pay_gateway_mode', { mode: targetMode }, 'POST');
+      if (res && res.success) {
+        toast(`✅ GreenHarvest Pay mode: ${targetMode.toUpperCase()}`);
+        await loadShopkeeperPayStatus();
+      } else {
+        toast(res.error || 'Failed to update gateway mode', 'error');
+      }
+    } catch (e) {
+      toast('Error toggling payment mode', 'error');
     }
   }
 
@@ -4481,6 +4677,8 @@ const App = (() => {
     setDefaultAddress,
     deleteAddress,
     loadShopProfile,
+    loadShopkeeperPayStatus,
+    togglePayMode,
     getState: () => state,
   };
 
@@ -4666,11 +4864,10 @@ const App = (() => {
           <button class="side-menu-nav-item ${(curHash === 'dashboard' || curHash === '') ? 'active' : ''}" id="smShopDashboard">
             <span class="icon">📊</span> ${isOwner ? 'Store &amp; Orders Dashboard' : 'Shopkeeper Dashboard'}
           </button>
-          ${isOwner ? `
-            <a href="pay/admin.php" class="side-menu-nav-item" id="smOwnerGHPay" style="background:#f0fdf4; border:1.5px solid #86efac; color:#15803d; font-weight:800;">
-              <span class="icon">🌿💳</span> GreenHarvest Pay Admin
-            </a>
-          ` : ''}
+          <a href="pay/admin.php" class="side-menu-nav-item" id="smShopGHPay" style="background:#ecfdf5; border:1.5px solid #10b981; color:#065f46; font-weight:800; display:flex; align-items:center; justify-content:space-between; margin:4px 0 8px 0; border-radius:10px; padding:10px 14px; text-decoration:none;">
+            <span style="display:flex; align-items:center; gap:8px;"><span class="icon" style="font-size:18px;">💳</span> GreenHarvest Pay</span>
+            <span style="background:#10b981; color:#ffffff; font-size:10.5px; padding:2px 8px; border-radius:12px; font-weight:700;">Admin ↗</span>
+          </a>
           <button class="side-menu-nav-item ${curHash === 'orders' ? 'active' : ''}" id="smShopOrders">
             <span class="icon">📦</span> Order Management
           </button>
@@ -5169,6 +5366,8 @@ const App = (() => {
     setDefaultAddress,
     deleteAddress,
     loadShopProfile,
+    loadShopkeeperPayStatus,
+    togglePayMode,
     renderShopkeeperView,
     setShopOrderCategory,
     reacceptOrder,

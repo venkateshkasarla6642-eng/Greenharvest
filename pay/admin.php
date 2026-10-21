@@ -8,7 +8,7 @@ require_once __DIR__ . '/../config.php';
 $user = getCurrentUser();
 
 // ─── Server-side owner check — MUST be first ─────────────────────────────────
-if (!$user || $user['role'] !== 'owner') {
+if (!$user || ($user['role'] !== 'owner' && $user['role'] !== 'shopkeeper')) {
     // Do not reveal this page exists to non-owners
     $scriptDir = dirname($_SERVER['SCRIPT_NAME'] ?? '');
     $baseApp = rtrim(str_replace('\\', '/', dirname($scriptDir)), '/');

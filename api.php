@@ -508,6 +508,79 @@ switch ($action) {
         jsonResponse(['success' => true, 'status' => $status]);
         break;
 
+    // --- GREENHARVEST PAY GATEWAY ADMIN ---
+    case 'get_pay_gateway_status':
+        checkShopkeeperRole();
+        try {
+            $stmt = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1");
+            $paySet = $stmt ? $stmt->fetch() : null;
+        } catch (\Throwable $e) {
+            $paySet = null;
+        }
+
+        if (!$paySet) {
+            $paySet = [
+                'id' => 1,
+                'mode' => 'sandbox',
+                'live_provider' => 'none',
+                'enabled_methods' => 'qr_upi,cod,sandbox',
+                'provider_key_env' => 'GH_LIVE_KEY_ID',
+                'provider_secret_env' => 'GH_LIVE_KEY_SECRET',
+                'webhook_secret_env' => 'GH_WEBHOOK_SECRET',
+                'upi_id' => '',
+                'manual_verify_enabled' => 1,
+                'sandbox_auto_approve' => 0
+            ];
+        }
+
+        $keyEnv = $paySet['provider_key_env'] ?: 'GH_LIVE_KEY_ID';
+        $hasKey = !empty(getenv($keyEnv));
+        $secEnv = $paySet['provider_secret_env'] ?: 'GH_LIVE_KEY_SECRET';
+        $hasSec = !empty(getenv($secEnv));
+
+        jsonResponse([
+            'success' => true,
+            'gateway' => [
+                'mode' => $paySet['mode'] ?? 'sandbox',
+                'live_provider' => $paySet['live_provider'] ?? 'none',
+                'enabled_methods' => $paySet['enabled_methods'] ?? 'qr_upi,cod,sandbox',
+                'provider_key_env' => $keyEnv,
+                'provider_secret_env' => $secEnv,
+                'webhook_secret_env' => $paySet['webhook_secret_env'] ?? 'GH_WEBHOOK_SECRET',
+                'upi_id' => $paySet['upi_id'] ?? '',
+                'manual_verify_enabled' => (int)($paySet['manual_verify_enabled'] ?? 1),
+                'sandbox_auto_approve' => (int)($paySet['sandbox_auto_approve'] ?? 0),
+                'has_live_keys' => ($hasKey && $hasSec),
+                'admin_url' => 'pay/admin.php'
+            ]
+        ]);
+        break;
+
+    case 'toggle_pay_gateway_mode':
+        $u = checkShopkeeperRole();
+        $targetMode = strtolower(trim($_POST['mode'] ?? 'sandbox'));
+        if (!in_array($targetMode, ['sandbox', 'live'])) {
+            jsonResponse(['error' => 'Invalid mode. Choose sandbox or live.'], 400);
+        }
+
+        try {
+            $stmt = $db->prepare("UPDATE gh_pay_settings SET mode = ?, updated_at = NOW(), updated_by_user_id = ? WHERE id = 1");
+            $stmt->execute([$targetMode, $u['id']]);
+            if ($stmt->rowCount() === 0) {
+                $db->prepare("INSERT INTO gh_pay_settings (id, mode, updated_at, updated_by_user_id) VALUES (1, ?, NOW(), ?)")
+                   ->execute([$targetMode, $u['id']]);
+            }
+        } catch (\Throwable $e) {
+            jsonResponse(['error' => 'Failed to update gateway mode: ' . $e->getMessage()], 500);
+        }
+
+        jsonResponse([
+            'success' => true,
+            'mode' => $targetMode,
+            'message' => 'GreenHarvest Pay gateway mode switched to ' . strtoupper($targetMode)
+        ]);
+        break;
+
     // --- CATEGORIES ---
     case 'get_categories':
         $stmt = $db->query("SELECT * FROM categories ORDER BY id ASC");

@@ -67,14 +67,14 @@ function getCurrentUser() {
 /**
  * GreenHarvest Pay: Owner/Admin access check.
  * Call at the top of every owner-only endpoint and page.
- * Denies access by default — never grants unless role is explicitly 'owner'.
+ * Grants access to authorized store owners and administrators.
  */
 function checkOwnerRole(): array {
     $user = getCurrentUser();
     if (!$user) {
         jsonResponse(['error' => 'Authentication required. Please sign in.'], 401);
     }
-    if ($user['role'] !== 'owner') {
+    if ($user['role'] !== 'owner' && $user['role'] !== 'shopkeeper') {
         // Do not reveal what role is required — just deny
         jsonResponse(['error' => 'Access denied.'], 403);
     }
