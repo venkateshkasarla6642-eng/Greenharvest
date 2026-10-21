@@ -569,9 +569,8 @@ const PayAdmin = (function() {
 
     const s = res.settings;
 
-    // Mode radio
-    const modeEl = document.getElementById(s.mode === 'live' ? 'modeLive' : 'modeSandbox');
-    if (modeEl) modeEl.checked = true;
+    // Mode selection UI update
+    updateModeUI(s.mode || 'sandbox');
 
     // Enabled methods checkboxes
     const methods = (s.enabled_methods || '').split(',').map(m => m.trim());
@@ -654,46 +653,76 @@ const PayAdmin = (function() {
     if (fields) fields.style.display = (prov && prov !== 'none') ? 'block' : 'none';
   }
 
-  async function onModeChange(mode) {
+  function updateModeUI(mode) {
     const isLive = (mode === 'live');
-    const modeLiveEl = document.getElementById('modeLive');
-    const modeSandboxEl = document.getElementById('modeSandbox');
-    if (modeLiveEl) modeLiveEl.checked = isLive;
-    if (modeSandboxEl) modeSandboxEl.checked = !isLive;
+    const input = document.getElementById('selectedModeInput');
+    if (input) input.value = isLive ? 'live' : 'sandbox';
 
-    const provEl = document.getElementById('liveProvider');
+    const cardLive = document.getElementById('cardModeLive');
+    const cardSandbox = document.getElementById('cardModeSandbox');
+    const indLive = document.getElementById('indicatorLive');
+    const indSandbox = document.getElementById('indicatorSandbox');
+
+    if (cardLive) {
+      if (isLive) cardLive.classList.add('active');
+      else cardLive.classList.remove('active');
+    }
+    if (cardSandbox) {
+      if (!isLive) cardSandbox.classList.add('active');
+      else cardSandbox.classList.remove('active');
+    }
+    if (indLive) {
+      indLive.style.display = isLive ? 'inline-block' : 'none';
+      indLive.style.background = '#ef4444';
+      indLive.style.color = '#fff';
+    }
+    if (indSandbox) {
+      indSandbox.style.display = !isLive ? 'inline-block' : 'none';
+      indSandbox.style.background = '#10b981';
+      indSandbox.style.color = '#fff';
+    }
+
+    // Topbar badge
+    const tbBadge = document.getElementById('topbarModeBadge');
+    if (tbBadge) {
+      tbBadge.textContent = isLive ? 'LIVE' : 'SANDBOX';
+      tbBadge.className = 'pay-mode-badge' + (isLive ? ' live-mode' : '');
+    }
+    // Overview pill
+    const pill = document.getElementById('modePill');
+    if (pill) {
+      pill.className = 'pay-mode-pill' + (isLive ? ' live-mode' : '');
+      setText('modePillText', isLive ? '🔴 Live Mode' : '🧪 Sandbox Mode');
+    }
+
     if (isLive) {
+      const provEl = document.getElementById('liveProvider');
       if (provEl && (!provEl.value || provEl.value === 'none')) {
         provEl.value = 'razorpay';
       }
       toggleProviderFields();
-
-      // Check live payment methods
       const cbLiveUpi = document.querySelector('input[name="method_live_upi"]');
       if (cbLiveUpi) cbLiveUpi.checked = true;
       const cbLiveCard = document.querySelector('input[name="method_live_card"]');
       if (cbLiveCard) cbLiveCard.checked = true;
     }
+  }
 
-    toast(isLive ? '🔴 Activating Live (Production) Mode...' : '🧪 Activating Sandbox Mode...', 'info');
-    const res = await apiPost('owner_switch_mode', { mode });
+  async function selectMode(mode) {
+    const targetMode = (mode === 'live') ? 'live' : 'sandbox';
+    updateModeUI(targetMode);
+    toast(targetMode === 'live' ? '🔴 Switching to Live (Production) Mode...' : '🧪 Switching to Sandbox Mode...', 'info');
+
+    const res = await apiPost('owner_switch_mode', { mode: targetMode });
     if (res && res.success) {
-      toast(isLive ? '✅ Live (Production) Mode Active!' : '✅ Sandbox Mode Active!', 'success');
-      // Update topbar badge
-      const tbBadge = document.getElementById('topbarModeBadge');
-      if (tbBadge) {
-        tbBadge.textContent = isLive ? 'LIVE' : 'SANDBOX';
-        tbBadge.className = 'pay-mode-badge' + (isLive ? ' live-mode' : '');
-      }
-      // Update overview pill
-      const pill = document.getElementById('modePill');
-      if (pill) {
-        pill.className = 'pay-mode-pill' + (isLive ? ' live-mode' : '');
-        setText('modePillText', isLive ? '🔴 Live Mode' : '🧪 Sandbox Mode');
-      }
+      toast(targetMode === 'live' ? '✅ Live (Production) Mode Active & Saved!' : '✅ Sandbox Mode Active & Saved!', 'success');
     } else {
-      toast(res?.error || 'Failed to switch mode.', 'error');
+      toast(res?.error || 'Failed to switch mode on server.', 'error');
     }
+  }
+
+  async function onModeChange(mode) {
+    return selectMode(mode);
   }
 
   async function saveSettings(e) {
@@ -713,7 +742,7 @@ const PayAdmin = (function() {
       if (form.querySelector(`input[name="method_${m}"]`)?.checked) methods.push(m);
     });
 
-    const modeVal = form.querySelector('input[name="mode"]:checked')?.value || 'sandbox';
+    const modeVal = document.getElementById('selectedModeInput')?.value || form.querySelector('input[name="mode"]:checked')?.value || 'sandbox';
     let provVal = document.getElementById('liveProvider')?.value || 'none';
     if (modeVal === 'live' && provVal === 'none') {
       provVal = 'razorpay';
@@ -777,9 +806,8 @@ const PayAdmin = (function() {
           ${res.key_id ? `<br><small style="color:#047857;">Active Key: <code>${esc(res.key_id)}</code></small>` : ''}
         </div>
       `;
-      // Ensure Live mode radio stays selected
-      const modeLive = document.getElementById('modeLive');
-      if (modeLive) modeLive.checked = true;
+      // Ensure Live mode stays selected and active
+      updateModeUI('live');
       const provEl = document.getElementById('liveProvider');
       if (provEl) {
         provEl.value = 'razorpay';
@@ -1333,6 +1361,7 @@ Thank you for shopping with GreenHarvest Fresh Vegetables!`;
     doSandboxSim,
     exportCsv,
     saveSettings,
+    selectMode,
     onModeChange,
     testRazorpay,
     uploadQr,

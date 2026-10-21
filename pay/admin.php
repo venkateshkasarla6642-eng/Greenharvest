@@ -444,22 +444,29 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
 
         <div class="pay-form-group">
           <label class="pay-label">Payment Mode</label>
-          <div class="pay-mode-toggle">
-            <label class="pay-mode-opt">
-              <input type="radio" name="mode" value="sandbox" id="modeSandbox" <?= $currentMode === 'sandbox' ? 'checked' : '' ?> onchange="PayAdmin.onModeChange('sandbox')">
-              <span class="pay-mode-card pay-mode-sandbox">
-                🧪 Sandbox (Testing)<br>
-                <small>No real money. Safe for development.</small>
-              </span>
-            </label>
-            <label class="pay-mode-opt">
-              <input type="radio" name="mode" value="live" id="modeLive" <?= $currentMode === 'live' ? 'checked' : '' ?> onchange="PayAdmin.onModeChange('live')">
-              <span class="pay-mode-card pay-mode-live">
-                🔴 Live (Production)<br>
-                <small>Real payments. Requires valid merchant credentials.</small>
-              </span>
-            </label>
+          <div class="pay-mode-toggle" id="payModeToggleGroup">
+            <div class="pay-mode-card pay-mode-sandbox <?= $currentMode === 'sandbox' ? 'active' : '' ?>" id="cardModeSandbox" onclick="PayAdmin.selectMode('sandbox')" role="button" tabindex="0">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:20px;">🧪</span>
+                  <strong style="font-size:14.5px;">Sandbox (Testing)</strong>
+                </div>
+                <span class="pay-mode-indicator" id="indicatorSandbox" style="font-size:11px;padding:2px 8px;border-radius:12px;font-weight:700;<?= $currentMode === 'sandbox' ? 'background:#10b981;color:#fff;' : 'display:none;' ?>">ACTIVE</span>
+              </div>
+              <small style="display:block;margin-top:6px;font-size:12px;opacity:0.85;color:var(--pay-text-muted);">No real money. Safe for development &amp; simulations.</small>
+            </div>
+            <div class="pay-mode-card pay-mode-live <?= $currentMode === 'live' ? 'active' : '' ?>" id="cardModeLive" onclick="PayAdmin.selectMode('live')" role="button" tabindex="0">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-size:20px;">🔴</span>
+                  <strong style="font-size:14.5px;">Live (Production)</strong>
+                </div>
+                <span class="pay-mode-indicator" id="indicatorLive" style="font-size:11px;padding:2px 8px;border-radius:12px;font-weight:700;<?= $currentMode === 'live' ? 'background:#ef4444;color:#fff;' : 'display:none;' ?>">ACTIVE</span>
+              </div>
+              <small style="display:block;margin-top:6px;font-size:12px;opacity:0.85;color:var(--pay-text-muted);">Real payments. Collects real customer orders via Razorpay.</small>
+            </div>
           </div>
+          <input type="hidden" name="mode" id="selectedModeInput" value="<?= htmlspecialchars($currentMode) ?>">
         </div>
 
         <div class="pay-form-group">

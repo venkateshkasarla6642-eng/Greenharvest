@@ -550,27 +550,45 @@ table.pay-table tr:hover td { background: rgba(255,255,255,0.02); }
   gap: 10px;
 }
 
-.pay-mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pay-mode-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .pay-mode-opt { cursor: pointer; }
 .pay-mode-opt input { display: none; }
 
 .pay-mode-card {
   display: block;
-  padding: 14px;
+  padding: 14px 16px;
   border-radius: var(--pay-radius-sm);
   border: 2px solid var(--pay-border);
   font-size: 13px;
   font-weight: 600;
   color: var(--pay-text-sub);
-  transition: all 0.15s;
+  background: var(--pay-surface);
+  cursor: pointer;
+  transition: all 0.2s ease;
   line-height: 1.5;
+  user-select: none;
 }
 
-.pay-mode-opt input:checked + .pay-mode-card {
-  border-color: var(--pay-primary);
-  background: rgba(16,185,129,0.08);
-  color: var(--pay-text);
+.pay-mode-card:hover {
+  border-color: #64748b;
+  transform: translateY(-1px);
+}
+
+.pay-mode-card.pay-mode-sandbox.active,
+.pay-mode-opt input[value="sandbox"]:checked + .pay-mode-card {
+  border-color: #10b981 !important;
+  background: rgba(16, 185, 129, 0.12) !important;
+  color: var(--pay-text) !important;
+  box-shadow: 0 0 0 1px #10b981;
+}
+
+.pay-mode-card.pay-mode-live.active,
+.pay-mode-opt input[value="live"]:checked + .pay-mode-card {
+  border-color: #ef4444 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: var(--pay-text) !important;
+  box-shadow: 0 0 0 1px #ef4444;
 }
 
 .pay-mode-sandbox small,

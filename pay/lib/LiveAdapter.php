@@ -30,7 +30,7 @@ class LiveAdapter {
     /**
      * Unified environment variable reader: checks getenv(), $_ENV, $_SERVER, and /proc/1/environ (for Docker containers on Render).
      */
-    private function getEnvVal(string $key): ?string {
+    public static function getEnvVal(string $key): ?string {
         if (getenv($key) !== false && getenv($key) !== '') {
             return (string)getenv($key);
         }

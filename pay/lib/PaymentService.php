@@ -89,6 +89,14 @@ class PaymentService {
                     ALTER TABLE shop_settings ALTER COLUMN qr_image_path TYPE TEXT;
                 ");
             } catch (\Throwable $e) {}
+
+            // Unconditionally ensure row 1 exists in gh_pay_settings so UPDATE queries never fail
+            try {
+                $hasRow = $this->db->query("SELECT 1 FROM gh_pay_settings WHERE id = 1")->fetchColumn();
+                if (!$hasRow) {
+                    $this->db->exec("INSERT INTO gh_pay_settings (id, mode, live_provider, enabled_methods) VALUES (1, 'sandbox', 'none', 'qr_upi,cod,live_upi,live_card') ON CONFLICT (id) DO NOTHING");
+                }
+            } catch (\Throwable $e) {}
         } catch (\Throwable $e) {
             error_log('[GHPay] ensureSchema error: ' . $e->getMessage());
         }
@@ -141,6 +149,17 @@ class PaymentService {
             $s = $stmt->fetch() ?: [];
         } catch (\Throwable $e) {}
 
+        // Check if GH_PAY_MODE=live is in Render environment
+        $envMode = LiveAdapter::getEnvVal('GH_PAY_MODE');
+        if (!empty($envMode) && strtolower(trim($envMode)) === 'live') {
+            if (empty($s['mode']) || $s['mode'] === 'sandbox') {
+                $s['mode'] = 'live';
+            }
+        }
+        if (empty($s['mode'])) {
+            $s['mode'] = 'sandbox';
+        }
+
         // Fallback for upi_id if empty: check shop_settings
         if (empty($s['upi_id'])) {
             try {
@@ -157,6 +176,9 @@ class PaymentService {
     }
 
     public function getSettings(): array {
+        if ($this->isLiveMode()) {
+            $this->settings['mode'] = 'live';
+        }
         return $this->settings;
     }
 
@@ -181,13 +203,16 @@ class PaymentService {
         if (!$hasLiveKeys && !empty($keyId) && str_starts_with($keyId, 'rzp_') && !empty($this->live->getKeySecret())) {
             $hasLiveKeys = true;
         }
+        if ($isLive && !empty($keyId) && str_starts_with($keyId, 'rzp_')) {
+            $hasLiveKeys = true;
+        }
 
         return [
             'success'               => true,
             'enabled'               => (int)($s['manual_verify_enabled'] ?? 1) === 1,
-            'mode'                  => $s['mode'] ?? 'sandbox',
+            'mode'                  => $isLive ? 'live' : ($s['mode'] ?? 'sandbox'),
             'is_sandbox'            => !$isLive,
-            'enabled_methods'       => $s['enabled_methods'] ?? 'qr_upi,cod,sandbox',
+            'enabled_methods'       => $s['enabled_methods'] ?? ($isLive ? 'qr_upi,cod,live_upi,live_card' : 'qr_upi,cod,sandbox'),
             'live_provider'         => $provider,
             'has_live_keys'         => $hasLiveKeys,
             'live_key_id'           => $keyId,
@@ -199,7 +224,13 @@ class PaymentService {
     }
 
     public function isLiveMode(): bool {
-        return ($this->settings['mode'] ?? 'sandbox') === 'live';
+        $mode = $this->settings['mode'] ?? '';
+        if ($mode === 'live') return true;
+        $envMode = LiveAdapter::getEnvVal('GH_PAY_MODE');
+        if (!empty($envMode) && strtolower(trim($envMode)) === 'live') {
+            return true;
+        }
+        return false;
     }
 
     public function isSandboxMode(): bool {

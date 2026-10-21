@@ -500,7 +500,12 @@ const GHPay = (function () {
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        const isRazorpayReady = (settings.has_live_keys || (settings.live_key_id && settings.live_key_id.startsWith('rzp_'))) && (settings.live_provider === 'razorpay' || (settings.live_key_id && settings.live_key_id.startsWith('rzp_')));
+        const isRazorpayReady = !!(
+          settings.has_live_keys ||
+          (settings.live_key_id && settings.live_key_id.startsWith('rzp_')) ||
+          (settings.live_provider === 'razorpay') ||
+          (settings.mode === 'live')
+        );
         if (isRazorpayReady) {
           container.innerHTML = `
             <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:14px;font-size:13px;color:#166534;margin-top:10px;">
@@ -593,7 +598,9 @@ const GHPay = (function () {
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        if (initiateRes.provider === 'razorpay' && initiateRes.key_id) {
+        const rzpKey = initiateRes.key_id || _cachedSettings?.live_key_id;
+        if ((initiateRes.provider === 'razorpay' || rzpKey) && rzpKey) {
+          initiateRes.key_id = rzpKey;
           _openRazorpay(initiateRes, s, paymentRef);
         } else {
           _showError('Live payment provider credentials are not configured. Please choose UPI QR or COD.');
