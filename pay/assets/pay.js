@@ -675,9 +675,57 @@ const PayAdmin = (function() {
     const res = await apiPost('owner_update_settings', data);
     if (res.success) {
       toast('Settings saved!', 'success');
+      await loadSettings();
       loadDashboard();
     } else {
       toast(res.error || 'Save failed.', 'error');
+    }
+  }
+
+  async function testRazorpay() {
+    const btn = document.getElementById('btnTestRazorpay');
+    const resultEl = document.getElementById('testConnectionResult');
+    if (!resultEl) return;
+
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Testing connection...';
+    }
+
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<span style="color:#64748b;">Connecting to Razorpay API...</span>';
+
+    const keyId = document.getElementById('providerKeyEnv')?.value?.trim() || '';
+    const keySecret = document.getElementById('providerSecretEnv')?.value?.trim() || '';
+
+    const payload = {};
+    if (keyId) payload.key_id = keyId;
+    if (keySecret && !keySecret.includes('•••')) payload.key_secret = keySecret;
+
+    const res = await apiPost('owner_test_razorpay', payload);
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalText;
+    }
+
+    if (res && res.success) {
+      resultEl.innerHTML = `
+        <div style="background:#ecfdf5;border:1px solid #10b981;color:#065f46;border-radius:8px;padding:10px 12px;line-height:1.5;">
+          <strong>✅ Connection Successful!</strong><br>
+          ${esc(res.message || 'Razorpay API responded successfully.')}
+          ${res.key_id ? `<br><small style="color:#047857;">Active Key: <code>${esc(res.key_id)}</code></small>` : ''}
+        </div>
+      `;
+      await loadSettings();
+    } else {
+      resultEl.innerHTML = `
+        <div style="background:#fef2f2;border:1px solid #ef4444;color:#991b1b;border-radius:8px;padding:10px 12px;line-height:1.5;">
+          <strong>❌ Connection Failed:</strong><br>
+          ${esc(res?.error || 'Could not authenticate with Razorpay. Please check your Key ID and Key Secret.')}
+        </div>
+      `;
     }
   }
 
@@ -1176,6 +1224,7 @@ Thank you for shopping with GreenHarvest Fresh Vegetables!`;
     doSandboxSim,
     exportCsv,
     saveSettings,
+    testRazorpay,
     uploadQr,
     toggleProviderFields,
     openModal,

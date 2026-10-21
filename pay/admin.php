@@ -490,8 +490,15 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
             <input type="password" name="provider_secret_env" id="providerSecretEnv" class="pay-input" placeholder="e.g. your_secret or GH_LIVE_KEY_SECRET">
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Webhook Secret (Optional — for webhooks)</label>
+            <label class="pay-label">Webhook Secret (Optional — only needed for webhooks)</label>
             <input type="text" name="webhook_secret_env" id="webhookSecretEnv" class="pay-input" placeholder="e.g. your_webhook_secret or GH_WEBHOOK_SECRET">
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Render env var name: <code>GH_WEBHOOK_SECRET</code> (Optional: not needed for checkout)</div>
+          </div>
+          <div style="margin-top:12px;">
+            <button type="button" class="pay-btn pay-btn-outline pay-btn-sm" onclick="PayAdmin.testRazorpay()" id="btnTestRazorpay" style="padding:8px 16px;">
+              🔌 Test Razorpay Connection
+            </button>
+            <div id="testConnectionResult" style="margin-top:8px;font-size:12.5px;display:none;"></div>
           </div>
         </div>
 

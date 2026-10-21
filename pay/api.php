@@ -638,14 +638,20 @@ switch ($action) {
                 : $keyId;
         }
 
+        // Auto-display detected key so inputs are never mysteriously blank
+        $displayKey = $settings['provider_key_env'] ?? '';
+        if (empty($displayKey) && !empty($keyId)) {
+            $displayKey = $keyId;
+        }
+
         // Never expose secrets — return only non-sensitive fields
         $safe = [
             'id'                   => $settings['id'] ?? 1,
             'mode'                 => $settings['mode'] ?? 'sandbox',
             'enabled_methods'      => $settings['enabled_methods'] ?? 'qr_upi,cod',
             'live_provider'        => $live->getProviderName() !== 'none' ? $live->getProviderName() : ($settings['live_provider'] ?? 'none'),
-            'provider_key_env'     => $settings['provider_key_env'] ?? '',
-            'provider_secret_env'  => $settings['provider_secret_env'] ?? '',
+            'provider_key_env'     => $displayKey,
+            'provider_secret_env'  => !empty($settings['provider_secret_env']) ? $settings['provider_secret_env'] : (!empty($live->getKeySecret()) ? '••••••••' : ''),
             'webhook_secret_env'   => $settings['webhook_secret_env'] ?? '',
             'has_live_keys'        => $hasLiveKeys,
             'key_id_preview'       => $keyPreview,
@@ -672,6 +678,22 @@ switch ($action) {
         $upi_id               = trim($_POST['upi_id'] ?? '');
         $manual_verify        = isset($_POST['manual_verify_enabled']) ? 1 : 0;
         $sandbox_auto         = isset($_POST['sandbox_auto_approve']) ? 1 : 0;
+
+        // Preserve existing keys in DB if form submitted blank or with masked placeholder
+        $currentSettings = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1")->fetch();
+        if (!$currentSettings) {
+            $db->exec("INSERT INTO gh_pay_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING");
+            $currentSettings = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1")->fetch() ?: [];
+        }
+        if (empty($provider_key_env) && !empty($currentSettings['provider_key_env'])) {
+            $provider_key_env = $currentSettings['provider_key_env'];
+        }
+        if ((empty($provider_secret_env) || str_contains($provider_secret_env, '•••')) && !empty($currentSettings['provider_secret_env'])) {
+            $provider_secret_env = $currentSettings['provider_secret_env'];
+        }
+        if (empty($webhook_secret_env) && !empty($currentSettings['webhook_secret_env'])) {
+            $webhook_secret_env = $currentSettings['webhook_secret_env'];
+        }
 
         if (!in_array($mode, ['sandbox', 'live'])) {
             jsonResponse(['error' => 'Invalid mode.'], 400);
@@ -709,6 +731,28 @@ switch ($action) {
         ], $owner['id'], 'settings', 1);
 
         jsonResponse(['success' => true, 'message' => 'GreenHarvest Pay settings updated.']);
+        break;
+
+    /**
+     * Test Razorpay API connection (owner only).
+     * POST: key_id (optional), key_secret (optional)
+     */
+    case 'owner_test_razorpay':
+        payRequireOwner();
+        $testKey    = trim($_POST['key_id'] ?? '');
+        $testSecret = trim($_POST['key_secret'] ?? '');
+
+        if (!empty($testKey) && !empty($testSecret) && !str_contains($testSecret, '•••')) {
+            $testAdapter = new LiveAdapter([
+                'live_provider'       => 'razorpay',
+                'provider_key_env'    => $testKey,
+                'provider_secret_env' => $testSecret
+            ]);
+            $res = $testAdapter->testConnection();
+        } else {
+            $res = $payService->getLiveAdapter()->testConnection();
+        }
+        jsonResponse($res);
         break;
 
     /**

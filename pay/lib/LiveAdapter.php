@@ -43,13 +43,18 @@ class LiveAdapter {
             }
         }
         if (empty($resolvedKey)) {
-            $resolvedKey = getenv('GH_LIVE_KEY_ID')
-                ?: getenv('RAZORPAY_KEY_ID')
-                ?: getenv('RAZORPAY_KEY')
-                ?: getenv('RZP_KEY_ID')
-                ?: getenv('RZP_TEST_KEY_ID')
-                ?: getenv('KEY_ID')
-                ?: '';
+            $candidates = [
+                'GH_LIVE_KEY_ID', 'RAZORPAY_KEY_ID', 'RAZORPAY_KEY',
+                'RAZORPAY_API_KEY', 'RZP_KEY_ID', 'RZP_TEST_KEY_ID',
+                'RZP_KEY', 'KEY_ID', 'API_KEY'
+            ];
+            foreach ($candidates as $cand) {
+                $v = getenv($cand);
+                if (!empty($v) && ($cand !== 'API_KEY' || str_starts_with($v, 'rzp_'))) {
+                    $resolvedKey = trim($v);
+                    break;
+                }
+            }
         }
         $this->keyId = $resolvedKey;
 
@@ -64,13 +69,18 @@ class LiveAdapter {
             }
         }
         if (empty($resolvedSecret)) {
-            $resolvedSecret = getenv('GH_LIVE_KEY_SECRET')
-                ?: getenv('RAZORPAY_KEY_SECRET')
-                ?: getenv('RAZORPAY_SECRET')
-                ?: getenv('RZP_KEY_SECRET')
-                ?: getenv('RZP_TEST_KEY_SECRET')
-                ?: getenv('KEY_SECRET')
-                ?: '';
+            $candidates = [
+                'GH_LIVE_KEY_SECRET', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_SECRET',
+                'RAZORPAY_API_SECRET', 'RZP_KEY_SECRET', 'RZP_TEST_KEY_SECRET',
+                'RZP_SECRET', 'KEY_SECRET', 'API_SECRET'
+            ];
+            foreach ($candidates as $cand) {
+                $v = getenv($cand);
+                if (!empty($v)) {
+                    $resolvedSecret = trim($v);
+                    break;
+                }
+            }
         }
         $this->keySecret = $resolvedSecret;
 
@@ -85,10 +95,16 @@ class LiveAdapter {
             }
         }
         if (empty($resolvedWebhook)) {
-            $resolvedWebhook = getenv('GH_WEBHOOK_SECRET')
-                ?: getenv('RAZORPAY_WEBHOOK_SECRET')
-                ?: getenv('WEBHOOK_SECRET')
-                ?: '';
+            $candidates = [
+                'GH_WEBHOOK_SECRET', 'RAZORPAY_WEBHOOK_SECRET', 'WEBHOOK_SECRET'
+            ];
+            foreach ($candidates as $cand) {
+                $v = getenv($cand);
+                if (!empty($v)) {
+                    $resolvedWebhook = trim($v);
+                    break;
+                }
+            }
         }
         $this->webhookSecret = $resolvedWebhook;
 
@@ -132,6 +148,40 @@ class LiveAdapter {
 
     public function isTestMode(): bool {
         return str_starts_with($this->keyId, 'rzp_test_');
+    }
+
+    /**
+     * Test API connection with the configured provider credentials.
+     */
+    public function testConnection(): array {
+        if (!$this->isConfigured()) {
+            return [
+                'success' => false,
+                'error'   => 'Credentials not configured. Please enter your Razorpay Key ID and Key Secret.'
+            ];
+        }
+
+        if ($this->provider === 'razorpay') {
+            $res = $this->curlGet('https://api.razorpay.com/v1/orders?count=1', $this->keyId, $this->keySecret);
+            if ($res['success']) {
+                $isTest = $this->isTestMode();
+                return [
+                    'success'  => true,
+                    'provider' => 'razorpay',
+                    'is_test'  => $isTest,
+                    'key_id'   => $this->keyId,
+                    'message'  => 'Successfully connected to Razorpay API! ' . ($isTest ? '🧪 Test Mode (rzp_test) is active.' : '🟢 Live Production mode is active.')
+                ];
+            }
+            $errData = json_decode($res['body'] ?? '', true);
+            $errMsg = $errData['error']['description'] ?? ($res['error'] ?? 'Authentication failed.');
+            return [
+                'success' => false,
+                'error'   => 'Razorpay connection test failed: ' . $errMsg
+            ];
+        }
+
+        return ['success' => true, 'message' => 'Provider configured.'];
     }
 
     /**
