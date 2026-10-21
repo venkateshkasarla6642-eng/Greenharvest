@@ -10,13 +10,28 @@ $db = getDB();
 $payService = new PaymentService($db);
 
 $token = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_GET['token'] ?? '');
-$link = null;
-if (!empty($token)) {
-    $link = $payService->getPaymentLinkByToken($token);
-}
+$link = $payService->getPaymentLinkByToken($token);
 
 $settings = $payService->getPublicSettings();
 $isSandbox = ($settings['mode'] ?? 'sandbox') === 'sandbox';
+
+// Ensure store UPI ID is never empty
+$upiId = !empty($settings['upi_id']) ? $settings['upi_id'] : 'greenharvest@upi';
+$amtFloat = floatval($link['amount'] ?? 100);
+$amtFormatted = number_format($amtFloat, 2, '.', '');
+$cleanTitle = urlencode($link['title'] ?? 'GreenHarvest Vegetables');
+
+// Build UPI Intent Deep Link
+$upiIntentUrl = "upi://pay?pa=" . urlencode($upiId) . "&pn=" . urlencode("GreenHarvest") . "&am=" . $amtFormatted . "&cu=INR&tn=" . $cleanTitle;
+
+// Build QR Image Source
+$qrImg = $settings['qr_image_path'] ?? '';
+$qrSrc = '';
+if (!empty($qrImg)) {
+    $qrSrc = (str_starts_with($qrImg, 'http')) ? $qrImg : ('../' . ltrim($qrImg, '/'));
+} else {
+    $qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=" . urlencode($upiIntentUrl);
+}
 
 $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     $_SESSION['pay_csrf_token'] = bin2hex(random_bytes(32));
@@ -28,17 +43,17 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <title><?= $link ? htmlspecialchars($link['title']) . ' — GreenHarvest Pay' : 'GreenHarvest Pay — Secure Payment' ?></title>
+  <title><?= htmlspecialchars($link['title']) ?> — GreenHarvest Pay</title>
   <link rel="icon" href="../assets/icons/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
-  <?php if (!empty($settings['has_live_keys']) && ($settings['live_provider'] ?? '') === 'razorpay'): ?>
+  <?php if (!$isSandbox && !empty($settings['has_live_keys']) && ($settings['live_provider'] ?? '') === 'razorpay'): ?>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <?php endif; ?>
   <style>
     :root {
-      --gh-bg: #f8fafc;
+      --gh-bg: #f1f5f9;
       --gh-surface: #ffffff;
       --gh-primary: #10b981;
       --gh-primary-dk: #059669;
@@ -46,8 +61,8 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       --gh-text: #0f172a;
       --gh-muted: #64748b;
       --gh-border: #e2e8f0;
-      --gh-radius: 16px;
-      --gh-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      --gh-radius: 18px;
+      --gh-shadow: 0 10px 35px rgba(0,0,0,0.08);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -59,7 +74,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 20px 14px;
+      padding: 18px 14px 40px;
     }
     .gh-card {
       background: var(--gh-surface);
@@ -72,7 +87,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       animation: ghFadeIn 0.3s ease;
     }
     @keyframes ghFadeIn {
-      from { opacity: 0; transform: translateY(10px); }
+      from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: translateY(0); }
     }
     .gh-header {
@@ -116,26 +131,26 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     .gh-mode-sandbox { background: #fef08a; color: #854d0e; }
     .gh-mode-live    { background: #bbf7d0; color: #166534; }
 
-    .gh-body { padding: 24px 20px; }
+    .gh-body { padding: 22px 20px; }
 
     .gh-amount-hero {
       text-align: center;
       background: var(--gh-primary-light);
       border: 1.5px dashed #a7f3d0;
       border-radius: 14px;
-      padding: 18px 14px;
-      margin-bottom: 20px;
+      padding: 16px 14px;
+      margin-bottom: 18px;
     }
     .gh-amount-label {
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 700;
       color: #065f46;
       text-transform: uppercase;
       letter-spacing: 0.6px;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
     }
     .gh-amount-val {
-      font-size: 36px;
+      font-size: 34px;
       font-weight: 900;
       color: #047857;
       letter-spacing: -0.5px;
@@ -144,8 +159,8 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     .gh-meta-box {
       border: 1px solid var(--gh-border);
       border-radius: 12px;
-      padding: 14px 16px;
-      margin-bottom: 20px;
+      padding: 12px 14px;
+      margin-bottom: 18px;
       background: #fafafa;
     }
     .gh-meta-row {
@@ -153,21 +168,124 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       justify-content: space-between;
       align-items: center;
       padding: 6px 0;
-      font-size: 13px;
+      font-size: 12.5px;
       border-bottom: 1px dashed var(--gh-border);
     }
     .gh-meta-row:last-child { border-bottom: none; }
     .gh-meta-label { color: var(--gh-muted); font-weight: 500; }
     .gh-meta-value { color: var(--gh-text); font-weight: 700; text-align: right; }
 
+    /* ─── 1-Click UPI Payment App Buttons ─── */
+    .gh-section-title {
+      font-size: 12.5px;
+      font-weight: 800;
+      color: #334155;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 18px 0 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gh-apps-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .gh-app-btn {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 700;
+      transition: all 0.15s ease;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      cursor: pointer;
+    }
+    .gh-app-btn:hover {
+      transform: translateY(-2px);
+      filter: brightness(1.08);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.16);
+    }
+    .gh-app-btn:active { transform: translateY(0); }
+    .gh-app-icon {
+      font-size: 22px;
+      width: 28px;
+      text-align: center;
+    }
+    .gh-app-name {
+      font-size: 13.5px;
+      line-height: 1.2;
+    }
+    .gh-app-sub {
+      font-size: 10px;
+      opacity: 0.85;
+      font-weight: 500;
+    }
+
+    .gh-app-phonepe { background: linear-gradient(135deg, #5f259f, #4a154b); }
+    .gh-app-gpay    { background: linear-gradient(135deg, #1a73e8, #0d47a1); }
+    .gh-app-paytm   { background: linear-gradient(135deg, #00b9f5, #002e6e); }
+    .gh-app-bhim    { background: linear-gradient(135deg, #f37920, #d9531e); }
+
+    /* ─── UPI QR Box ─── */
+    .gh-qr-box {
+      background: #fafafa;
+      border: 1px solid var(--gh-border);
+      border-radius: 14px;
+      padding: 16px;
+      text-align: center;
+      margin-bottom: 18px;
+    }
+    .gh-qr-img {
+      width: 175px;
+      height: 175px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      padding: 6px;
+      background: #fff;
+      margin: 8px auto 12px auto;
+      display: block;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .gh-upi-pill {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      color: #065f46;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .gh-copy-chip {
+      background: #10b981;
+      color: #fff;
+      border: none;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* ─── Buttons ─── */
     .gh-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       width: 100%;
-      padding: 14px 20px;
+      padding: 13px 18px;
       border-radius: 10px;
-      font-size: 15px;
+      font-size: 14.5px;
       font-weight: 800;
       border: none;
       cursor: pointer;
@@ -177,24 +295,23 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     }
     .gh-btn-primary {
       background: linear-gradient(135deg, #10b981, #059669);
-      box-shadow: 0 4px 14px rgba(16,185,129,0.35);
+      box-shadow: 0 4px 14px rgba(16,185,129,0.3);
     }
     .gh-btn-primary:hover {
       background: linear-gradient(135deg, #059669, #047857);
       transform: translateY(-1px);
     }
-    .gh-btn-primary:active { transform: translateY(0); }
 
     .gh-sim-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px;
-      margin-top: 12px;
+      margin-top: 10px;
     }
     .gh-sim-btn {
-      padding: 11px 12px;
+      padding: 10px;
       border-radius: 8px;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 700;
       border: none;
       cursor: pointer;
@@ -208,10 +325,10 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       border: 1px solid #fca5a5;
       color: #dc2626;
       border-radius: 10px;
-      padding: 12px 14px;
+      padding: 11px 14px;
       font-size: 13px;
       font-weight: 600;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       display: none;
     }
 
@@ -242,19 +359,8 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   </div>
 
   <div class="gh-body" id="ghBody">
-    <?php if (!$link): ?>
-      <!-- NOT FOUND -->
-      <div style="text-align:center;padding:24px 10px;">
-        <div style="font-size:48px;margin-bottom:12px;">🔍</div>
-        <h2 style="font-size:20px;font-weight:800;color:#0f172a;margin-bottom:8px;">Payment Link Not Found</h2>
-        <p style="font-size:13.5px;color:#64748b;line-height:1.6;margin-bottom:20px;">
-          This payment link may be invalid, expired, or removed. Please check the URL or contact GreenHarvest for assistance.
-        </p>
-        <a href="../" class="gh-btn gh-btn-primary">Visit GreenHarvest Store</a>
-      </div>
-
-    <?php elseif ($link['status'] === 'paid'): ?>
-      <!-- ALREADY PAID -->
+    <?php if ($link['status'] === 'paid'): ?>
+      <!-- ALREADY PAID SCREEN -->
       <div style="text-align:center;padding:20px 8px;">
         <div style="font-size:52px;margin-bottom:12px;">✅</div>
         <h2 style="font-size:22px;font-weight:900;color:#15803d;margin-bottom:6px;">Payment Confirmed!</h2>
@@ -292,7 +398,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       </div>
 
     <?php elseif ($link['status'] === 'cancelled'): ?>
-      <!-- CANCELLED -->
+      <!-- CANCELLED SCREEN -->
       <div style="text-align:center;padding:24px 10px;">
         <div style="font-size:48px;margin-bottom:12px;">🚫</div>
         <h2 style="font-size:20px;font-weight:800;color:#64748b;margin-bottom:8px;">Payment Link Cancelled</h2>
@@ -303,7 +409,7 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       </div>
 
     <?php elseif ($link['status'] === 'expired' || !empty($link['is_expired'])): ?>
-      <!-- EXPIRED -->
+      <!-- EXPIRED SCREEN -->
       <div style="text-align:center;padding:24px 10px;">
         <div style="font-size:48px;margin-bottom:12px;">⏰</div>
         <h2 style="font-size:20px;font-weight:800;color:#dc2626;margin-bottom:8px;">Payment Link Expired</h2>
@@ -314,18 +420,18 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
       </div>
 
     <?php else: ?>
-      <!-- ACTIVE UNPAID PAYMENT REQUEST -->
+      <!-- ACTIVE PAYMENT PAGE (ALWAYS SHOWS PAYMENT DETAILS) -->
       <div id="paymentContent">
         <!-- Error Banner -->
         <div id="ghErrorBanner" class="gh-error-banner"></div>
 
-        <!-- Amount Box -->
+        <!-- Payable Amount Box -->
         <div class="gh-amount-hero">
-          <div class="gh-amount-label">Payable Amount</div>
+          <div class="gh-amount-label">Final Payable Amount</div>
           <div class="gh-amount-val"><?= htmlspecialchars($link['formatted_amount']) ?></div>
         </div>
 
-        <!-- Meta Details -->
+        <!-- Meta Details Box -->
         <div class="gh-meta-box">
           <div class="gh-meta-row">
             <span class="gh-meta-label">Purpose</span>
@@ -344,21 +450,87 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
             </div>
           <?php endif; ?>
           <?php if (!empty($link['description'])): ?>
-            <div style="padding-top:8px;font-size:12.5px;color:#475569;line-height:1.5;">
+            <div style="padding-top:8px;font-size:12px;color:#475569;line-height:1.5;">
               <strong>Note:</strong> <?= nl2br(htmlspecialchars($link['description'])) ?>
             </div>
           <?php endif; ?>
         </div>
 
-        <!-- Payment Options by Gateway Mode -->
+        <!-- ═══════════ 1. 1-CLICK PAY WITH UPI APPS ═══════════ -->
+        <div class="gh-section-title">⚡ 1-Click Pay with UPI Apps</div>
+        <div class="gh-apps-grid">
+          <!-- PhonePe -->
+          <a href="<?= htmlspecialchars($upiIntentUrl) ?>" class="gh-app-btn gh-app-phonepe" title="Pay with PhonePe">
+            <span class="gh-app-icon">🟣</span>
+            <div>
+              <div class="gh-app-name">PhonePe</div>
+              <div class="gh-app-sub">Instant Pay</div>
+            </div>
+          </a>
+
+          <!-- Google Pay (GPay) -->
+          <a href="<?= htmlspecialchars($upiIntentUrl) ?>" class="gh-app-btn gh-app-gpay" title="Pay with Google Pay">
+            <span class="gh-app-icon">🔵</span>
+            <div>
+              <div class="gh-app-name">Google Pay</div>
+              <div class="gh-app-sub">GPay UPI</div>
+            </div>
+          </a>
+
+          <!-- Paytm -->
+          <a href="<?= htmlspecialchars($upiIntentUrl) ?>" class="gh-app-btn gh-app-paytm" title="Pay with Paytm">
+            <span class="gh-app-icon">🔷</span>
+            <div>
+              <div class="gh-app-name">Paytm</div>
+              <div class="gh-app-sub">Scan or Tap</div>
+            </div>
+          </a>
+
+          <!-- BHIM / Any UPI App -->
+          <a href="<?= htmlspecialchars($upiIntentUrl) ?>" class="gh-app-btn gh-app-bhim" title="Pay with any UPI App">
+            <span class="gh-app-icon">🟠</span>
+            <div>
+              <div class="gh-app-name">BHIM UPI</div>
+              <div class="gh-app-sub">Any UPI App</div>
+            </div>
+          </a>
+        </div>
+
+        <!-- ═══════════ 2. OFFICIAL UPI QR CODE & UPI ID ═══════════ -->
+        <div class="gh-section-title">📷 Scan UPI QR Code</div>
+        <div class="gh-qr-box">
+          <p style="font-size:12px;color:#64748b;margin-bottom:4px;">Scan with PhonePe, Google Pay, Paytm, or BHIM</p>
+
+          <img src="<?= htmlspecialchars($qrSrc) ?>" alt="UPI QR Code" class="gh-qr-img">
+
+          <div>
+            <div class="gh-upi-pill">
+              <span>UPI: <strong id="upiIdText"><?= htmlspecialchars($upiId) ?></strong></span>
+              <button type="button" class="gh-copy-chip" onclick="copyUpiId()">📋 Copy</button>
+            </div>
+          </div>
+
+          <!-- UTR Submission Box -->
+          <div style="text-align:left;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-top:6px;">
+            <label style="display:block;font-size:12px;font-weight:700;color:#334155;margin-bottom:4px;">
+              UPI Reference ID / UTR <span style="color:#ef4444">*</span>
+            </label>
+            <input type="text" id="linkUtrInput" placeholder="e.g. 417123456789 (12-digit UTR)" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;box-sizing:border-box;">
+            <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Enter transaction reference after transfer to confirm.</div>
+            <button type="button" class="gh-btn gh-btn-primary" onclick="executePayment('qr_upi')" style="margin-top:10px;padding:11px;">
+              📱 Submit Payment Details
+            </button>
+          </div>
+        </div>
+
+        <!-- ═══════════ 3. SANDBOX TEST SIMULATOR (If in Sandbox) ═══════════ -->
         <?php if ($isSandbox): ?>
-          <!-- SANDBOX SIMULATOR -->
-          <div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:12px;padding:16px;margin-bottom:14px;">
-            <div style="font-weight:800;color:#1e40af;font-size:13.5px;margin-bottom:4px;">
+          <div style="background:#eff6ff;border:1.5px solid #93c5fd;border-radius:12px;padding:14px;margin-bottom:14px;">
+            <div style="font-weight:800;color:#1e40af;font-size:13px;margin-bottom:4px;">
               🧪 GreenHarvest Pay — Sandbox Simulator
             </div>
-            <p style="font-size:12px;color:#3b82f6;margin-bottom:12px;">
-              No real money is charged. Choose an outcome below to test the complete server-side payment lifecycle:
+            <p style="font-size:11.5px;color:#3b82f6;margin-bottom:10px;">
+              Click below to test server-side payment verification without real money:
             </p>
             <div class="gh-sim-grid">
               <button type="button" class="gh-sim-btn" style="background:#10b981;" onclick="executePayment('sandbox', 'paid')">
@@ -377,54 +549,10 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
           </div>
         <?php endif; ?>
 
-        <!-- UPI QR PAYMENT (Available in both test and live) -->
-        <?php if (!empty($settings['upi_id']) || !empty($settings['qr_image_path'])): ?>
-          <div style="background:#fafafa;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center;margin-bottom:14px;">
-            <div style="font-size:13.5px;font-weight:700;color:#0f172a;margin-bottom:4px;">📷 Scan &amp; Pay via UPI QR</div>
-            <div style="font-size:12px;color:#64748b;margin-bottom:12px;">GPay, PhonePe, Paytm, BHIM, or any UPI app</div>
-
-            <?php
-              $upiId = $settings['upi_id'] ?? '';
-              $qrImg = $settings['qr_image_path'] ?? '';
-              $amtFloat = floatval($link['amount']);
-              $qrSrc = '';
-              if (!empty($qrImg)) {
-                  $qrSrc = (str_starts_with($qrImg, 'http')) ? $qrImg : ('../' . ltrim($qrImg, '/'));
-              } elseif (!empty($upiId)) {
-                  $qrSrc = "https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=" . urlencode("upi://pay?pa=$upiId&pn=GreenHarvest&am=" . number_format($amtFloat, 2, '.', '') . "&cu=INR");
-              }
-            ?>
-            <?php if ($qrSrc): ?>
-              <img src="<?= htmlspecialchars($qrSrc) ?>" alt="UPI QR" style="width:160px;height:160px;border-radius:8px;border:1px solid #cbd5e1;padding:6px;background:#fff;margin:0 auto 10px auto;display:block;">
-            <?php endif; ?>
-            <?php if ($upiId): ?>
-              <div style="font-weight:800;color:#047857;font-size:14px;margin-bottom:10px;">UPI: <?= htmlspecialchars($upiId) ?></div>
-            <?php endif; ?>
-
-            <div style="text-align:left;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-top:10px;">
-              <label style="display:block;font-size:12px;font-weight:700;color:#334155;margin-bottom:4px;">
-                UPI Transaction / Reference ID (UTR) <span style="color:#ef4444">*</span>
-              </label>
-              <input type="text" id="linkUtrInput" placeholder="e.g. 417123456789 (12-digit UTR)" style="width:100%;padding:9px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;">
-              <button type="button" class="gh-btn gh-btn-primary" onclick="executePayment('qr_upi')" style="margin-top:10px;padding:11px;">
-                📱 Submit UPI Payment Details
-              </button>
-            </div>
-          </div>
-        <?php endif; ?>
-
-        <!-- RAZORPAY LIVE GATEWAY -->
-        <?php if (!$isSandbox && !empty($settings['has_live_keys']) && ($settings['live_provider'] ?? '') === 'razorpay'): ?>
-          <button type="button" class="gh-btn gh-btn-primary" onclick="executeRazorpayLive()" style="margin-top:10px;">
-            💳 Pay <?= htmlspecialchars($link['formatted_amount']) ?> Securely via Razorpay
-          </button>
-        <?php endif; ?>
-
-        <!-- COD CONFIRMATION -->
-        <button type="button" class="gh-btn" style="background:#475569;margin-top:10px;" onclick="executePayment('cod')">
+        <!-- ═══════════ 4. CASH ON DELIVERY OPTION ═══════════ -->
+        <button type="button" class="gh-btn" style="background:#475569;margin-top:8px;" onclick="executePayment('cod')">
           💵 Confirm Cash on Delivery
         </button>
-
       </div>
     <?php endif; ?>
   </div>
@@ -435,9 +563,20 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
 </div>
 
 <script>
-  const LINK_TOKEN = <?= json_encode($token) ?>;
+  const LINK_TOKEN = <?= json_encode($link['link_token'] ?? $token) ?>;
   const LINK_DATA = <?= json_encode($link) ?>;
   const CSRF_TOKEN = <?= json_encode($csrfToken) ?>;
+  const UPI_ID = <?= json_encode($upiId) ?>;
+
+  function copyUpiId() {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(UPI_ID).then(() => {
+        alert('UPI ID copied: ' + UPI_ID);
+      });
+    } else {
+      prompt('Copy UPI ID:', UPI_ID);
+    }
+  }
 
   function showError(msg) {
     const el = document.getElementById('ghErrorBanner');
