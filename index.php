@@ -27,9 +27,24 @@ require_once 'config.php';
   <link rel="stylesheet" href="pay/assets/pay-checkout.css?v=<?php echo @filemtime(__DIR__ . '/pay/assets/pay-checkout.css'); ?>">
   <!-- Canvas Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-  <!-- Google Maps API key (set GOOGLE_MAPS_API_KEY env var in Render dashboard) -->
+<?php
+$ghMapsKey = getenv('GOOGLE_MAPS_API_KEY');
+if (empty($ghMapsKey) || $ghMapsKey === 'YOUR_GOOGLE_MAPS_API_KEY') {
+    try {
+        $db = getDB();
+        $row = $db->query("SELECT google_maps_api_key FROM shop_settings WHERE id = 1")->fetch();
+        if (!empty($row['google_maps_api_key'])) {
+            $ghMapsKey = $row['google_maps_api_key'];
+        }
+    } catch (Exception $e) {}
+}
+if ($ghMapsKey === 'YOUR_GOOGLE_MAPS_API_KEY') {
+    $ghMapsKey = '';
+}
+?>
+  <!-- Google Maps API key (Render env var GOOGLE_MAPS_API_KEY or shop settings) -->
   <script>
-    window.GH_MAPS_API_KEY = <?php echo json_encode(getenv('GOOGLE_MAPS_API_KEY') ?: 'YOUR_GOOGLE_MAPS_API_KEY'); ?>;
+    window.GH_MAPS_API_KEY = <?php echo json_encode($ghMapsKey ?: ''); ?>;
   </script>
 </head>
 <body>

@@ -483,9 +483,19 @@ switch ($action) {
         $free_delivery = floatval($_POST['free_delivery_above'] ?? 300);
         $delivery_charge = floatval($_POST['delivery_charge'] ?? 20);
         $est_time = trim($_POST['estimated_delivery_time'] ?? '20-35 mins');
+        $maps_api_key = trim($_POST['google_maps_api_key'] ?? '');
 
-        $stmt = $db->prepare("UPDATE shop_settings SET shop_name=?, shop_status=?, shop_upi_id=?, min_order_amount=?, free_delivery_above=?, delivery_charge=?, estimated_delivery_time=? WHERE id=1");
-        $stmt->execute([$shop_name, $shop_status, $shop_upi_id, $min_order, $free_delivery, $delivery_charge, $est_time]);
+        try {
+            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS google_maps_api_key VARCHAR(255) DEFAULT ''");
+        } catch (Exception $e) {}
+
+        if (isset($_POST['google_maps_api_key'])) {
+            $stmt = $db->prepare("UPDATE shop_settings SET shop_name=?, shop_status=?, shop_upi_id=?, min_order_amount=?, free_delivery_above=?, delivery_charge=?, estimated_delivery_time=?, google_maps_api_key=? WHERE id=1");
+            $stmt->execute([$shop_name, $shop_status, $shop_upi_id, $min_order, $free_delivery, $delivery_charge, $est_time, $maps_api_key]);
+        } else {
+            $stmt = $db->prepare("UPDATE shop_settings SET shop_name=?, shop_status=?, shop_upi_id=?, min_order_amount=?, free_delivery_above=?, delivery_charge=?, estimated_delivery_time=? WHERE id=1");
+            $stmt->execute([$shop_name, $shop_status, $shop_upi_id, $min_order, $free_delivery, $delivery_charge, $est_time]);
+        }
         
         jsonResponse(['success' => true, 'message' => 'Shop settings updated successfully']);
         break;
@@ -1504,6 +1514,7 @@ switch ($action) {
                 )
             ");
             $db->exec("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order ON delivery_tracking(order_id)");
+            $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS google_maps_api_key VARCHAR(255) DEFAULT ''");
         } catch (Exception $e) { /* table already exists */ }
         jsonResponse(['success' => true]);
         break;
@@ -1529,7 +1540,7 @@ switch ($action) {
             jsonResponse(['error' => 'Invalid GPS coordinates.'], 400);
         }
 
-        // Verify order exists and is OutForDelivery
+        // Verify order exists and is OutForDelivery (or automatically transition from Preparing / Accepted)
         $stmtOrd = $db->prepare("SELECT id, order_status FROM orders WHERE id = ?");
         $stmtOrd->execute([$orderId]);
         $ord = $stmtOrd->fetch();
@@ -1537,7 +1548,10 @@ switch ($action) {
         if (!$ord) {
             jsonResponse(['error' => 'Order not found.'], 404);
         }
-        if ($ord['order_status'] !== 'OutForDelivery') {
+        if ($ord['order_status'] === 'Preparing' || $ord['order_status'] === 'Accepted') {
+            $db->prepare("UPDATE orders SET order_status = 'OutForDelivery' WHERE id = ?")->execute([$orderId]);
+            $ord['order_status'] = 'OutForDelivery';
+        } elseif ($ord['order_status'] !== 'OutForDelivery') {
             jsonResponse(['error' => 'Location tracking is only active for orders that are Out for Delivery.'], 400);
         }
 
@@ -1585,8 +1599,8 @@ switch ($action) {
             jsonResponse(['error' => 'order_id is required.'], 400);
         }
 
-        // Security: customers may only query their own orders
-        $stmtOrd = $db->prepare("SELECT id, order_status, customer_id FROM orders WHERE id = ?");
+        // Security: customers may only query their own orders; shopkeepers/owners can query all
+        $stmtOrd = $db->prepare("SELECT id, order_number, order_status, customer_id, delivery_address, total_amount FROM orders WHERE id = ?");
         $stmtOrd->execute([$orderId]);
         $ord = $stmtOrd->fetch();
 
@@ -1597,26 +1611,35 @@ switch ($action) {
             jsonResponse(['error' => 'Access denied: this order does not belong to you.'], 403);
         }
 
-        // Fetch tracking row (table may not exist on fresh installs)
+        // Fetch tracking row
         $trackRow = null;
         try {
             $stmtTr = $db->prepare("SELECT latitude, longitude, accuracy, heading, speed, is_active, updated_at FROM delivery_tracking WHERE order_id = ?");
             $stmtTr->execute([$orderId]);
             $trackRow = $stmtTr->fetch();
-        } catch (Exception $e) {
-            // Table not yet created — just return null tracking
-        }
+        } catch (Exception $e) {}
+
+        $shop = null;
+        try {
+            $shop = $db->query("SELECT shop_name, shop_status, estimated_delivery_time FROM shop_settings WHERE id = 1")->fetch();
+        } catch (Exception $e) {}
 
         jsonResponse([
-            'order_status' => $ord['order_status'],
-            'tracking'     => $trackRow ?: null
+            'order_id'         => $ord['id'],
+            'order_number'     => $ord['order_number'],
+            'order_status'     => $ord['order_status'],
+            'delivery_address' => $ord['delivery_address'],
+            'tracking'         => $trackRow ?: null,
+            'shop'             => $shop ?: null
         ]);
         break;
 
     // POST — shopkeeper signals end of location sharing (called on Delivered / Rejected / Cancelled).
     case 'stop_delivery_tracking':
         $sk = checkShopkeeperRole();
-        $orderId = intval($_POST['order_id'] ?? 0);
+        $raw  = file_get_contents('php://input');
+        $body = json_decode($raw, true) ?? [];
+        $orderId = intval($body['order_id'] ?? $_POST['order_id'] ?? 0);
         if ($orderId <= 0) {
             jsonResponse(['error' => 'order_id is required.'], 400);
         }

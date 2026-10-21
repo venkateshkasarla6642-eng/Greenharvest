@@ -87,6 +87,24 @@ try {
     }
 
     // 2. Seed Shop Settings
+    $db->exec("
+        CREATE TABLE IF NOT EXISTS delivery_tracking (
+            id SERIAL PRIMARY KEY,
+            order_id INT NOT NULL UNIQUE,
+            latitude DOUBLE PRECISION NOT NULL,
+            longitude DOUBLE PRECISION NOT NULL,
+            accuracy DOUBLE PRECISION DEFAULT NULL,
+            heading DOUBLE PRECISION DEFAULT NULL,
+            speed DOUBLE PRECISION DEFAULT NULL,
+            is_active SMALLINT NOT NULL DEFAULT 1,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT fk_dt_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+        )
+    ");
+    $db->exec("CREATE INDEX IF NOT EXISTS idx_delivery_tracking_order ON delivery_tracking(order_id)");
+    $db->exec("ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS google_maps_api_key VARCHAR(255) DEFAULT ''");
+
     $db->exec("INSERT INTO shop_settings (id, shop_name, shop_status, shop_upi_id, min_order_amount, free_delivery_above, delivery_charge, estimated_delivery_time) 
                VALUES (1, 'GreenHarvest Veggies', 'OPEN', 'greenharvest@upi', 100.00, 300.00, 20.00, '20-30 mins')
                ON CONFLICT (id) DO UPDATE SET shop_name=EXCLUDED.shop_name");

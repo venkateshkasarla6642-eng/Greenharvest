@@ -163,7 +163,8 @@ CREATE TABLE IF NOT EXISTS shop_settings (
   min_order_amount DECIMAL(10,2) DEFAULT 100.00,
   free_delivery_above DECIMAL(10,2) DEFAULT 300.00,
   delivery_charge DECIMAL(10,2) DEFAULT 20.00,
-  estimated_delivery_time VARCHAR(50) DEFAULT '20-35 mins'
+  estimated_delivery_time VARCHAR(50) DEFAULT '20-35 mins',
+  google_maps_api_key VARCHAR(255) DEFAULT ''
 );
 
 -- Customer Delivery Addresses table

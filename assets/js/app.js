@@ -578,7 +578,9 @@ const App = (() => {
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // LIVE ORDER TRACKING  (with Google Maps real-time GPS)
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Tracking state (scoped to module â€” reset each time modal opens)
+    // ───────────────────────────────────────────────
+  // LIVE ORDER TRACKING (with Google Maps & Real-time Phone GPS)
+  // ───────────────────────────────────────────────
   let _trackingTimer = null;
   let _trackingMapObj = null;
   let _trackingMarkerObj = null;
@@ -589,142 +591,55 @@ const App = (() => {
   let _lastRouteDrawLng = null;
 
   function stopLiveTracking() {
-    if (_trackingTimer) { clearInterval(_trackingTimer); _trackingTimer = null; }
-  }
-
-  async function trackOrder(orderId) {
-    stopLiveTracking();
-    _trackingMapObj = null;
-    _trackingMarkerObj = null;
-    _destMarkerObj = null;
-    _directionsRendererObj = null;
-    _mapInitialized = false;
-    _lastRouteDrawLat = null;
-    _lastRouteDrawLng = null;
-
-    const data = await api('get_order_details', { id: orderId });
-    const ord = data.order;
-    if (!ord) { toast('Order not found', 'error'); return; }
-
-    const steps = [
-      { key: 'Placed',         label: 'Order Placed \u2713',                    desc: 'We received your vegetable order.' },
-      { key: 'Accepted',       label: 'Order Accepted \u2713',                  desc: 'Shopkeeper confirmed your order.' },
-      { key: 'Preparing',      label: 'Vegetables Being Prepared \U0001F96C',   desc: 'Fresh veggies picked & packed for you.' },
-      { key: 'OutForDelivery', label: 'Out for Delivery \U0001F6F5',            desc: 'Rider is heading to your location.' },
-      { key: 'Delivered',      label: 'Delivered \U0001F389',                   desc: 'Fresh veggies delivered. Enjoy!' }
-    ];
-
-    const statusOrder = { Placed:0, Accepted:1, Preparing:2, OutForDelivery:3, Delivered:4, Rejected:-1, Cancelled:-1 };
-    const curIdx = statusOrder[ord.order_status] ?? 0;
-
-    const stepsHtml = steps.map((s, i) => {
-      const cls = i < curIdx ? 'done' : i === curIdx ? 'current' : '';
-      return `<div class="t-step ${cls}">
-        <div class="t-dot"></div>
-        <div class="t-info"><h4>${s.label}</h4><p>${s.desc}</p></div>
-      </div>`;
-    }).join('');
-
-    const reviewSection = ord.order_status === 'Delivered' && !ord.review ? `
-      <button class="btn-primary w-full mt-3" onclick="App.openReview(${ord.id})" style="background:var(--accent);">
-        \u2B50 Rate Your Experience
-      </button>` : '';
-
-    const rejectSection = ord.order_status === 'Rejected' ? `
-      <div style="background:var(--danger-light);border-radius:10px;padding:12px;margin-top:12px;color:var(--danger);font-size:13.5px;">
-        \u274C Order Rejected: ${escapeHtml(ord.rejection_reason || 'Contact shop for details')}
-      </div>` : '';
-
-    const cancelSection = ord.order_status === 'Placed' ? `
-      <button class="btn-danger w-full mt-3" onclick="Modal.hide(); App.cancelCustomerOrder(${ord.id}, '${escapeHtml(ord.order_number)}');">
-        \u2715 Cancel Order
-      </button>` : '';
-
-    const cancelledNotice = ord.order_status === 'Cancelled' ? `
-      <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px;margin-top:12px;color:#b91c1c;font-size:13.5px;font-weight:700;">
-        \u274C This order was cancelled. (${escapeHtml(ord.rejection_reason || 'Cancelled by customer')})
-      </div>` : '';
-
-    const acceptedNotice = ['Accepted','Preparing','OutForDelivery'].includes(ord.order_status) ? `
-      <div class="order-accepted-notice" style="margin-top:12px;">
-        \U0001F512 This order has been accepted by the shopkeeper and can no longer be cancelled.
-      </div>` : '';
-
-    // Google Maps live tracking block â€” shown only while OutForDelivery
-    const mapsSection = ord.order_status === 'OutForDelivery' ? `
-      <div id="gh-map-section" style="margin:14px 0;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <div style="font-weight:800;font-size:14px;color:var(--primary-deep);">\U0001F4CD Live Delivery Map</div>
-          <div id="gh-map-badge" style="font-size:11px;background:#fff7ed;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:3px 10px;font-weight:700;">Loading...</div>
-        </div>
-        <div id="gh-delivery-map" style="width:100%;height:260px;border-radius:12px;background:#f1f5f9;border:1px solid #e2e8f0;overflow:hidden;position:relative;">
-          <div id="gh-map-placeholder" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#64748b;font-size:13px;">
-            <div style="font-size:32px;">\U0001F5FA\uFE0F</div><div>Locating delivery person...</div>
-          </div>
-        </div>
-        <div id="gh-map-eta" style="display:none;margin-top:8px;background:#f0fdf4;border-radius:8px;padding:8px 12px;font-size:13px;border:1px solid #d1fae5;">
-          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;">
-            <span>\U0001F4CF Distance: <strong id="gh-eta-dist">--</strong></span>
-            <span>\u23F1\uFE0F ETA: <strong id="gh-eta-time">--</strong></span>
-            <span style="color:#64748b;font-size:11px;">\U0001F550 Updated: <span id="gh-last-upd">--</span></span>
-          </div>
-        </div>
-        <div id="gh-map-fallback" style="display:none;margin-top:8px;background:#fff7ed;border-radius:8px;padding:8px 12px;font-size:12.5px;color:#92400e;border:1px solid #fde68a;">
-          \u26A0\uFE0F Location not yet available. The delivery person will begin sharing their location shortly.
-        </div>
-      </div>` : '';
-
-    Modal.show(`
-      <div class="flex justify-between items-center mb-3">
-        <h2>\U0001F6F5 Live Order Tracking</h2>
-        <span style="background:var(--primary-light);padding:5px 14px;border-radius:20px;font-weight:800;color:var(--primary-deep);">${escapeHtml(ord.order_number)}</span>
-      </div>
-      <div style="background:#f8fafc;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;">
-        <div class="flex justify-between"><span class="text-muted">Customer:</span><strong>${escapeHtml(ord.customer_name)}</strong></div>
-        <div class="flex justify-between mt-1"><span class="text-muted">Total:</span><strong>${rupee(ord.total_amount)}</strong></div>
-        <div class="flex justify-between mt-1"><span class="text-muted">Payment:</span><strong>${escapeHtml(ord.payment_method)} (${escapeHtml(ord.payment_status)})</strong></div>
-        <div class="flex justify-between mt-1"><span class="text-muted">Delivery Address:</span><strong style="text-align:right;max-width:60%;">${escapeHtml(ord.delivery_address)}</strong></div>
-      </div>
-      ${mapsSection}
-      <div class="tracking-wrap"><div class="tracking-timeline">${stepsHtml}</div></div>
-      ${rejectSection}
-      ${cancelledNotice}
-      ${acceptedNotice}
-      ${reviewSection}
-      ${cancelSection}
-      <button class="btn-outline w-full mt-3" onclick="App.openChat()">\U0001F4AC Chat with Shopkeeper</button>
-    `);
-
-    if (ord.order_status === 'OutForDelivery') {
-      _startCustomerMapTracking(ord);
+    if (_trackingTimer) {
+      clearInterval(_trackingTimer);
+      _trackingTimer = null;
     }
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // CUSTOMER LIVE MAP ENGINE
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function _mapsApiKey() {
-    return window.GH_MAPS_API_KEY || 'YOUR_GOOGLE_MAPS_API_KEY';
+    const k = window.GH_MAPS_API_KEY || '';
+    return (typeof k === 'string' && k !== 'YOUR_GOOGLE_MAPS_API_KEY') ? k.trim() : '';
+  }
+
+  function _hasValidMapsApiKey() {
+    const k = _mapsApiKey();
+    return k.length > 15;
   }
 
   function _loadGoogleMapsScript() {
     return new Promise((resolve, reject) => {
       if (window.google && window.google.maps) { resolve(); return; }
-      // Avoid loading twice if a script tag already exists
+      if (!_hasValidMapsApiKey()) {
+        reject(new Error('NO_API_KEY'));
+        return;
+      }
+      window.gm_authFailure = function() {
+        console.warn('[Google Maps] Authentication failure: invalid API key or domain restriction.');
+        window._ghMapsAuthFailed = true;
+      };
+
       if (document.querySelector('script[data-gh-maps]')) {
         const poll = setInterval(() => {
           if (window.google && window.google.maps) { clearInterval(poll); resolve(); }
         }, 100);
-        setTimeout(() => { clearInterval(poll); reject(new Error('Maps timeout')); }, 15000);
+        setTimeout(() => { clearInterval(poll); reject(new Error('Maps script timeout')); }, 10000);
         return;
       }
+
       const s = document.createElement('script');
       s.setAttribute('data-gh-maps', '1');
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${_mapsApiKey()}&libraries=places`;
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(_mapsApiKey())}&libraries=places,geometry`;
       s.async = true;
       s.defer = true;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('Maps script load failed'));
+      s.onload = () => {
+        if (window._ghMapsAuthFailed) {
+          reject(new Error('AUTH_FAILED'));
+        } else {
+          resolve();
+        }
+      };
+      s.onerror = () => reject(new Error('SCRIPT_LOAD_ERROR'));
       document.head.appendChild(s);
     });
   }
@@ -733,13 +648,7 @@ const App = (() => {
     const b = document.getElementById('gh-map-badge');
     if (!b) return;
     b.textContent = text;
-    if (theme === 'green') {
-      b.style.cssText = 'font-size:11px;background:#f0fdf4;color:#166534;border:1px solid #86efac;border-radius:20px;padding:3px 10px;font-weight:700;';
-    } else if (theme === 'amber') {
-      b.style.cssText = 'font-size:11px;background:#fff7ed;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:3px 10px;font-weight:700;';
-    } else {
-      b.style.cssText = 'font-size:11px;background:#fef2f2;color:#b91c1c;border:1px solid #fca5a5;border-radius:20px;padding:3px 10px;font-weight:700;';
-    }
+    b.className = 'gh-map-badge ' + (theme || 'amber');
   }
 
   function _timeAgoShort(iso) {
@@ -757,47 +666,142 @@ const App = (() => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
+  function _renderGracefulMapFallback(ord, t) {
+    const container = document.getElementById('gh-delivery-map');
+    if (!container) return;
+
+    const lat = t?.latitude ? parseFloat(t.latitude) : null;
+    const lng = t?.longitude ? parseFloat(t.longitude) : null;
+    const hasGPS = (lat !== null && lng !== null && !isNaN(lat) && !isNaN(lng));
+
+    const defaultLat = 17.3850, defaultLng = 78.4867;
+    let distText = 'Estimating...';
+    let etaText = '15-25 mins';
+
+    if (hasGPS) {
+      const distMeters = _haversineMeters(lat, lng, defaultLat, defaultLng);
+      distText = distMeters < 1000 ? `${Math.round(distMeters)} m` : `${(distMeters / 1000).toFixed(1)} km`;
+      const mins = Math.max(3, Math.round((distMeters / 1000) / 20 * 60));
+      etaText = `${mins} mins`;
+    }
+
+    const d = document.getElementById('gh-eta-dist');
+    const e = document.getElementById('gh-eta-time');
+    if (d) d.textContent = distText;
+    if (e) e.textContent = etaText;
+
+    container.innerHTML = `
+      <div class="gh-fallback-card" style="height:100%; justify-content:center;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:26px;">🛵</span>
+            <div>
+              <div style="font-weight:800; font-size:14px; color:var(--primary-deep);">
+                ${hasGPS ? 'Live Shopkeeper GPS Connected' : 'Waiting for Shopkeeper Phone GPS'}
+              </div>
+              <div style="font-size:12px; color:var(--slate-500);">
+                ${hasGPS ? 'Genuine coordinates received from shopkeeper phone' : 'Shopkeeper will share their live phone location once on the road'}
+              </div>
+            </div>
+          </div>
+          ${hasGPS ? '<span class="pulse-dot-green"></span>' : '<span style="font-size:18px;">⏳</span>'}
+        </div>
+
+        <div class="gh-fallback-grid">
+          <div class="gh-fallback-metric">
+            <span class="gh-fallback-metric-lbl">Order Status</span>
+            <span class="gh-fallback-metric-val" style="color:var(--primary-deep); font-size:13px;">${escapeHtml(ord.order_status)}</span>
+          </div>
+          <div class="gh-fallback-metric">
+            <span class="gh-fallback-metric-lbl">Est. Distance</span>
+            <span class="gh-fallback-metric-val">${distText}</span>
+          </div>
+          <div class="gh-fallback-metric">
+            <span class="gh-fallback-metric-lbl">Est. Arrival</span>
+            <span class="gh-fallback-metric-val" style="color:var(--primary);">${etaText}</span>
+          </div>
+          <div class="gh-fallback-metric">
+            <span class="gh-fallback-metric-lbl">GPS Coordinates</span>
+            <span class="gh-fallback-metric-val" style="font-size:11.5px; font-family:monospace;">
+              ${hasGPS ? `${lat.toFixed(4)}, ${lng.toFixed(4)}` : 'Awaiting GPS...'}
+            </span>
+          </div>
+        </div>
+
+        <div style="background:#ffffff; border-radius:10px; padding:10px 12px; border:1px solid #e2e8f0; font-size:12px; display:flex; align-items:flex-start; gap:8px;">
+          <span style="font-size:16px;">📍</span>
+          <div>
+            <strong style="color:var(--slate-800);">Delivery Destination:</strong>
+            <div style="color:var(--slate-600); margin-top:2px;">${escapeHtml(ord.delivery_address || 'Customer Delivery Address')}</div>
+          </div>
+        </div>
+
+        ${!_hasValidMapsApiKey() ? `
+          <div style="font-size:11px; color:#94a3b8; background:rgba(255,255,255,0.7); padding:6px 10px; border-radius:6px; text-align:center;">
+            💡 For interactive Google Maps satellite view, set <code>GOOGLE_MAPS_API_KEY</code> in Render settings.
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
   async function _initMap(lat, lng, destAddress) {
+    if (!_hasValidMapsApiKey()) throw new Error('NO_VALID_MAPS_KEY');
     await _loadGoogleMapsScript();
-    const G = window.google.maps;
+    const G = window.google && window.google.maps;
+    if (!G) throw new Error('GOOGLE_MAPS_NOT_FOUND');
+
     const mapEl = document.getElementById('gh-delivery-map');
     if (!mapEl) return;
 
+    const placeholder = document.getElementById('gh-map-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+
     const center = { lat, lng };
     _trackingMapObj = new G.Map(mapEl, {
-      center, zoom: 15,
-      mapTypeControl: false, streetViewControl: false,
-      fullscreenControl: true, zoomControl: true,
+      center,
+      zoom: 15,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+      zoomControl: true,
       styles: [{ featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] }]
     });
 
-    const deliverySvg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 42 42"><circle cx="21" cy="21" r="20" fill="#16a34a" stroke="white" stroke-width="2.5"/><text x="21" y="28" text-anchor="middle" font-size="22">\U0001F6F5</text></svg>`);
-    const destSvg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="42" viewBox="0 0 32 42"><path d="M16 0C7.163 0 0 7.163 0 16c0 12 16 26 16 26S32 28 32 16C32 7.163 24.837 0 16 0z" fill="#ef4444"/><circle cx="16" cy="16" r="7" fill="white"/><circle cx="16" cy="16" r="4" fill="#ef4444"/></svg>`);
+    const deliverySvg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="21" fill="#16a34a" stroke="white" stroke-width="3"/><text x="22" y="29" text-anchor="middle" font-size="22">🛵</text></svg>`);
+    const destSvg = encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="34" height="44" viewBox="0 0 34 44"><path d="M17 0C7.611 0 0 7.611 0 17c0 13 17 27 17 27S34 30 34 17C34 7.611 26.389 0 17 0z" fill="#ef4444"/><circle cx="17" cy="17" r="7" fill="white"/><circle cx="17" cy="17" r="4" fill="#ef4444"/></svg>`);
 
     _trackingMarkerObj = new G.Marker({
-      position: center, map: _trackingMapObj, title: 'Delivery Person',
-      icon: { url: `data:image/svg+xml;charset=UTF-8,${deliverySvg}`, scaledSize: new G.Size(42, 42), anchor: new G.Point(21, 21) },
-      animation: G.Animation.DROP, zIndex: 10
-    });
-    _destMarkerObj = new G.Marker({
-      position: center, map: _trackingMapObj, title: 'Your Delivery Address',
-      icon: { url: `data:image/svg+xml;charset=UTF-8,${destSvg}`, scaledSize: new G.Size(32, 42), anchor: new G.Point(16, 42) },
-      animation: G.Animation.DROP, zIndex: 5
+      position: center,
+      map: _trackingMapObj,
+      title: 'Delivery Rider (Shopkeeper)',
+      icon: { url: `data:image/svg+xml;charset=UTF-8,${deliverySvg}`, scaledSize: new G.Size(44, 44), anchor: new G.Point(22, 22) },
+      zIndex: 10
     });
 
-    // Geocode delivery address
-    if (destAddress) {
+    _destMarkerObj = new G.Marker({
+      position: center,
+      map: _trackingMapObj,
+      title: 'Your Delivery Address',
+      icon: { url: `data:image/svg+xml;charset=UTF-8,${destSvg}`, scaledSize: new G.Size(34, 44), anchor: new G.Point(17, 44) },
+      zIndex: 5
+    });
+
+    if (destAddress && G.Geocoder) {
       const geocoder = new G.Geocoder();
       geocoder.geocode({ address: destAddress + ', India' }, (results, status) => {
-        if (status === 'OK' && results[0] && _destMarkerObj) {
+        if (status === 'OK' && results && results[0] && _destMarkerObj) {
           const pos = results[0].geometry.location;
           _destMarkerObj.setPosition(pos);
           if (_trackingMapObj) {
-            const bounds = new G.LatLngBounds(new G.LatLng(lat, lng), pos);
+            const bounds = new G.LatLngBounds();
+            bounds.extend(new G.LatLng(lat, lng));
+            bounds.extend(pos);
             _trackingMapObj.fitBounds(bounds);
           }
           _drawRoute(new G.LatLng(lat, lng), pos);
-          _lastRouteDrawLat = lat; _lastRouteDrawLng = lng;
+          _lastRouteDrawLat = lat;
+          _lastRouteDrawLng = lng;
         }
       });
     }
@@ -809,7 +813,7 @@ const App = (() => {
     if (!_directionsRendererObj) {
       _directionsRendererObj = new G.DirectionsRenderer({
         suppressMarkers: true,
-        polylineOptions: { strokeColor: '#16a34a', strokeWeight: 4, strokeOpacity: 0.8 }
+        polylineOptions: { strokeColor: '#16a34a', strokeWeight: 4.5, strokeOpacity: 0.85 }
       });
       _directionsRendererObj.setMap(_trackingMapObj);
     }
@@ -821,7 +825,7 @@ const App = (() => {
           const leg = result.routes[0]?.legs[0];
           const etaEl = document.getElementById('gh-map-eta');
           if (etaEl && leg) {
-            etaEl.style.display = 'block';
+            etaEl.style.display = 'flex';
             const d = document.getElementById('gh-eta-dist');
             const t = document.getElementById('gh-eta-time');
             if (d) d.textContent = leg.distance.text;
@@ -851,75 +855,206 @@ const App = (() => {
 
     async function pollOnce() {
       const mapEl = document.getElementById('gh-delivery-map');
-      if (!mapEl) { stopLiveTracking(); return; } // modal closed
+      if (!mapEl) { stopLiveTracking(); return; }
 
       let res;
-      try { res = await api('get_delivery_location', { order_id: ord.id }); }
-      catch(e) { return; }
+      try {
+        res = await api('get_delivery_location', { order_id: ord.id });
+      } catch(e) {
+        return;
+      }
 
-      // Stop if no longer out for delivery
-      if (res.order_status && res.order_status !== 'OutForDelivery') {
+      if (!res || !res.order_status) return;
+
+      if (res.order_status === 'Delivered') {
         stopLiveTracking();
-        if (res.order_status === 'Delivered') _setBadge('\u2705 Delivered!', 'green');
+        _setBadge('✅ Delivered!', 'green');
+        return;
+      }
+      if (['Rejected', 'Cancelled'].includes(res.order_status)) {
+        stopLiveTracking();
+        _setBadge('❌ ' + res.order_status, 'red');
         return;
       }
 
       const t = res.tracking;
-      const fallbackEl = document.getElementById('gh-map-fallback');
-      const placeholder = document.getElementById('gh-map-placeholder');
-
-      if (!t || !t.latitude || !t.longitude) {
-        if (!_mapInitialized) {
-          if (placeholder) placeholder.innerHTML = '<div style="font-size:28px">\U0001F50D</div><div>Waiting for delivery location...</div>';
-          if (fallbackEl) fallbackEl.style.display = 'block';
-          _setBadge('\u23F3 Waiting for location...', 'amber');
-        }
-        return;
-      }
-
-      const lat = parseFloat(t.latitude), lng = parseFloat(t.longitude);
-      const stale = (Date.now() - new Date(t.updated_at).getTime()) > 5 * 60 * 1000;
       const updEl = document.getElementById('gh-last-upd');
-      if (updEl) updEl.textContent = _timeAgoShort(t.updated_at);
-
-      if (!t.is_active || stale) {
-        _setBadge('\U0001F550 Last seen: ' + _timeAgoShort(t.updated_at), 'amber');
-      } else {
-        _setBadge('\U0001F7E2 Live location', 'green');
+      if (updEl && t?.updated_at) {
+        updEl.textContent = _timeAgoShort(t.updated_at);
       }
 
-      if (fallbackEl) fallbackEl.style.display = 'none';
+      const hasGPS = !!(t && t.latitude && t.longitude);
 
-      if (!_mapInitialized) {
-        _mapInitialized = true;
-        if (placeholder) placeholder.style.display = 'none';
-        try {
-          await _initMap(lat, lng, ord.delivery_address || '');
-        } catch(e) {
-          // Maps API failed (bad key, network) â€” show friendly fallback
-          if (placeholder) placeholder.innerHTML = `<div style="font-size:24px">\U0001F5FA\uFE0F</div><div style="font-size:12px;color:#ef4444;padding:0 12px;text-align:center;">Map unavailable.<br>Check your Google Maps API key.</div>`;
-          _setBadge('\u26A0\uFE0F Map unavailable', 'red');
-          stopLiveTracking();
+      if (hasGPS) {
+        const lat = parseFloat(t.latitude), lng = parseFloat(t.longitude);
+        const stale = (Date.now() - new Date(t.updated_at).getTime()) > 5 * 60 * 1000;
+
+        if (!t.is_active || stale) {
+          _setBadge('⏱️ Last seen ' + _timeAgoShort(t.updated_at), 'amber');
+        } else {
+          _setBadge('🟢 Live Location', 'green');
         }
-      } else if (_trackingMarkerObj && _trackingMapObj && window.google) {
-        _smoothMoveMarker(lat, lng);
-        _trackingMapObj.panTo(new window.google.maps.LatLng(lat, lng));
 
-        if (_lastRouteDrawLat !== null && _destMarkerObj) {
-          const moved = _haversineMeters(lat, lng, _lastRouteDrawLat, _lastRouteDrawLng);
-          if (moved > 150) {
-            _drawRoute(new window.google.maps.LatLng(lat, lng), _destMarkerObj.getPosition());
-            _lastRouteDrawLat = lat; _lastRouteDrawLng = lng;
+        if (_hasValidMapsApiKey()) {
+          if (!_mapInitialized) {
+            _mapInitialized = true;
+            try {
+              await _initMap(lat, lng, ord.delivery_address || '');
+            } catch(e) {
+              _renderGracefulMapFallback(ord, t);
+            }
+          } else if (_trackingMarkerObj && _trackingMapObj && window.google) {
+            _smoothMoveMarker(lat, lng);
+            _trackingMapObj.panTo(new window.google.maps.LatLng(lat, lng));
+
+            if (_lastRouteDrawLat !== null && _destMarkerObj) {
+              const moved = _haversineMeters(lat, lng, _lastRouteDrawLat, _lastRouteDrawLng);
+              if (moved > 100) {
+                _drawRoute(new window.google.maps.LatLng(lat, lng), _destMarkerObj.getPosition());
+                _lastRouteDrawLat = lat;
+                _lastRouteDrawLng = lng;
+              }
+            }
           }
+        } else {
+          _renderGracefulMapFallback(ord, t);
+        }
+      } else {
+        _setBadge(ord.order_status === 'OutForDelivery' ? '⏳ Waiting for Rider GPS' : '🥬 Preparing Veggies', 'amber');
+        if (_hasValidMapsApiKey()) {
+          if (!_mapInitialized) {
+            _mapInitialized = true;
+            const defaultLat = 17.3850, defaultLng = 78.4867;
+            try {
+              await _initMap(defaultLat, defaultLng, ord.delivery_address || '');
+            } catch(e) {
+              _renderGracefulMapFallback(ord, null);
+            }
+          }
+        } else {
+          _renderGracefulMapFallback(ord, null);
         }
       }
     }
 
-    pollOnce();
-    _trackingTimer = setInterval(pollOnce, 8000);
+    await pollOnce();
+    _trackingTimer = setInterval(pollOnce, 6000);
   }
 
-  // ───────────────────────────────────────────────
+  async function trackOrder(orderId) {
+    stopLiveTracking();
+    _trackingMapObj = null;
+    _trackingMarkerObj = null;
+    _destMarkerObj = null;
+    _directionsRendererObj = null;
+    _mapInitialized = false;
+    _lastRouteDrawLat = null;
+    _lastRouteDrawLng = null;
+
+    const data = await api('get_order_details', { id: orderId });
+    const ord = data.order;
+    if (!ord) { toast('Order not found', 'error'); return; }
+
+    const steps = [
+      { key: 'Placed',         label: 'Order Placed ✓',                    desc: 'We received your vegetable order.' },
+      { key: 'Accepted',       label: 'Order Accepted ✓',                  desc: 'Shopkeeper confirmed your order.' },
+      { key: 'Preparing',      label: 'Vegetables Being Prepared 🥬',       desc: 'Fresh veggies picked & packed for you.' },
+      { key: 'OutForDelivery', label: 'Out for Delivery 🛵',                desc: 'Rider is heading to your location.' },
+      { key: 'Delivered',      label: 'Delivered 🎉',                       desc: 'Fresh veggies delivered. Enjoy!' }
+    ];
+
+    const statusOrder = { Placed:0, Accepted:1, Preparing:2, OutForDelivery:3, Delivered:4, Rejected:-1, Cancelled:-1 };
+    const curIdx = statusOrder[ord.order_status] ?? 0;
+
+    const stepsHtml = steps.map((s, i) => {
+      const cls = i < curIdx ? 'done' : i === curIdx ? 'current' : '';
+      return `<div class="t-step ${cls}">
+        <div class="t-dot"></div>
+        <div class="t-info"><h4>${s.label}</h4><p>${s.desc}</p></div>
+      </div>`;
+    }).join('');
+
+    const reviewSection = ord.order_status === 'Delivered' && !ord.review ? `
+      <button class="btn-primary w-full mt-3" onclick="App.openReview(${ord.id})" style="background:var(--accent);">
+        ⭐ Rate Your Experience
+      </button>` : '';
+
+    const rejectSection = ord.order_status === 'Rejected' ? `
+      <div style="background:var(--danger-light);border-radius:10px;padding:12px;margin-top:12px;color:var(--danger);font-size:13.5px;">
+        ❌ Order Rejected: ${escapeHtml(ord.rejection_reason || 'Contact shop for details')}
+      </div>` : '';
+
+    const cancelSection = ord.order_status === 'Placed' ? `
+      <button class="btn-danger w-full mt-3" onclick="Modal.hide(); App.cancelCustomerOrder(${ord.id}, '${escapeHtml(ord.order_number)}');">
+        ✕ Cancel Order
+      </button>` : '';
+
+    const cancelledNotice = ord.order_status === 'Cancelled' ? `
+      <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:12px;margin-top:12px;color:#b91c1c;font-size:13.5px;font-weight:700;">
+        ❌ This order was cancelled. (${escapeHtml(ord.rejection_reason || 'Cancelled by customer')})
+      </div>` : '';
+
+    const acceptedNotice = ['Accepted','Preparing','OutForDelivery'].includes(ord.order_status) ? `
+      <div class="order-accepted-notice" style="margin-top:12px;">
+        🔒 This order has been accepted by the shopkeeper and can no longer be cancelled.
+      </div>` : '';
+
+    const isTrackingEligible = ['Accepted', 'Preparing', 'OutForDelivery', 'Delivered'].includes(ord.order_status);
+
+    const mapsSection = isTrackingEligible ? `
+      <div id="gh-map-section" class="gh-map-card">
+        <div class="gh-map-header">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:18px;">📍</span>
+            <strong style="font-size:14px; color:var(--primary-deep);">Live Delivery Map</strong>
+          </div>
+          <div id="gh-map-badge" class="gh-map-badge amber">
+            ${ord.order_status === 'Delivered' ? '✅ Delivered' : ord.order_status === 'OutForDelivery' ? '🟢 Out for Delivery' : '🥬 Preparing Veggies'}
+          </div>
+        </div>
+        <div id="gh-delivery-map" class="gh-map-container">
+          <div id="gh-map-placeholder" style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:#64748b; font-size:13px; text-align:center; padding:16px;">
+            <div class="spinner" style="width:30px; height:30px; border-width:3px;"></div>
+            <div>Initializing live delivery map...</div>
+          </div>
+        </div>
+        <div id="gh-map-eta" class="gh-telemetry-bar">
+          <div class="gh-telemetry-metrics">
+            <span>📏 Distance: <strong id="gh-eta-dist">Calculating...</strong></span>
+            <span>⏱️ ETA: <strong id="gh-eta-time">Calculating...</strong></span>
+          </div>
+          <span style="color:#64748b; font-size:11.5px;">🕒 Updated: <span id="gh-last-upd">Just now</span></span>
+        </div>
+      </div>
+    ` : '';
+
+    Modal.show(`
+      <div class="flex justify-between items-center mb-3">
+        <h2>🛵 Live Order Tracking</h2>
+        <span style="background:var(--primary-light);padding:5px 14px;border-radius:20px;font-weight:800;color:var(--primary-deep);">${escapeHtml(ord.order_number)}</span>
+      </div>
+      <div style="background:#f8fafc;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:16px;border:1px solid #e2e8f0;">
+        <div class="flex justify-between"><span class="text-muted">Customer:</span><strong>${escapeHtml(ord.customer_name)}</strong></div>
+        <div class="flex justify-between mt-1"><span class="text-muted">Total:</span><strong>${rupee(ord.total_amount)}</strong></div>
+        <div class="flex justify-between mt-1"><span class="text-muted">Payment:</span><strong>${escapeHtml(ord.payment_method)} (${escapeHtml(ord.payment_status)})</strong></div>
+        <div class="flex justify-between mt-1"><span class="text-muted">Delivery Address:</span><strong style="text-align:right;max-width:60%;">${escapeHtml(ord.delivery_address)}</strong></div>
+      </div>
+      ${mapsSection}
+      <div class="tracking-wrap"><div class="tracking-timeline">${stepsHtml}</div></div>
+      ${rejectSection}
+      ${cancelledNotice}
+      ${acceptedNotice}
+      ${reviewSection}
+      ${cancelSection}
+      <button class="btn-outline w-full mt-3" onclick="App.openChat()">💬 Chat with Shopkeeper</button>
+    `);
+
+    if (isTrackingEligible) {
+      _startCustomerMapTracking(ord);
+    }
+  }
+
+// ───────────────────────────────────────────────
   // REVIEWS
   // ───────────────────────────────────────────────
   function openReview(orderId) {
@@ -3005,7 +3140,14 @@ const App = (() => {
             ` : ''}
             ${o.order_status === 'Accepted' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Preparing')">🥬 Start Preparing</button>` : ''}
             ${o.order_status === 'Preparing' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'OutForDelivery')">🛵 Out for Delivery</button>` : ''}
-            ${o.order_status === 'OutForDelivery' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Delivered')">🎉 Mark Delivered</button>` : ''}
+            ${o.order_status === 'OutForDelivery' ? `
+              <button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Delivered')">🎉 Mark Delivered</button>
+              <button class="os-btn sk-share-btn" data-order-id="${o.id}" onclick="App.toggleShopkeeperLocationSharing(${o.id}, this)"
+                style="${_skSharing && _skCurrentOrderId === o.id ? 'background:#dcfce7; border-color:#86efac; color:#15803d; font-weight:800;' : 'background:#ecfdf5; border-color:#6ee7b7; color:#065f46; font-weight:750;'}"
+                title="Share live phone GPS with customer">
+                ${_skSharing && _skCurrentOrderId === o.id ? '🟢 Live GPS Active (tap to stop)' : '📍 Start Live GPS Sharing'}
+              </button>
+            ` : ''}
             ${o.order_status === 'Delivered' ? `
               <span class="text-xs" style="font-weight:750; color:#15803d; background:#dcfce7; padding:4px 10px; border-radius:6px;">✔ Delivered</span>
             ` : ''}
@@ -3181,8 +3323,10 @@ const App = (() => {
             ${o.order_status === 'Preparing' ? `<button class="os-btn active" onclick="App.setOrderStatus(${o.id},'OutForDelivery'); Modal.hide();">🛵 Out for Delivery</button>` : ''}
             ${o.order_status === 'OutForDelivery' ? `
               <button class="os-btn active" onclick="App.setOrderStatus(${o.id},'Delivered'); Modal.hide();">🎉 Mark Delivered</button>
-              <button class="os-btn" id="sk-share-loc-btn" onclick="App.toggleShopkeeperLocationSharing(${o.id}, this)" style="background:#ecfdf5; border-color:#6ee7b7; color:#065f46; font-weight:750;" title="Share your live GPS location with the customer">
-                📍 Share My Location
+              <button class="os-btn sk-share-btn" data-order-id="${o.id}" onclick="App.toggleShopkeeperLocationSharing(${o.id}, this)"
+                style="${_skSharing && _skCurrentOrderId === o.id ? 'background:#dcfce7; border-color:#86efac; color:#15803d; font-weight:800;' : 'background:#ecfdf5; border-color:#6ee7b7; color:#065f46; font-weight:750;'}"
+                title="Share your live GPS location with the customer">
+                ${_skSharing && _skCurrentOrderId === o.id ? '🟢 Live GPS Active (tap to stop)' : '📍 Share My Location'}
               </button>
             ` : ''}
             ${o.order_status === 'Rejected' ? `<button class="os-btn active" onclick="App.reacceptOrder(${o.id},'${escapeHtml(o.order_number)}'); Modal.hide();">🔄 Re-Accept</button>` : ''}
@@ -3243,6 +3387,49 @@ const App = (() => {
   let _skWatchId = null;          // browser watchPosition ID
   let _skCurrentOrderId = null;   // order currently being tracked
   let _skSharing = false;         // are we actively sharing?
+  let _skLastSendTime = 0;        // throttle updates to server
+
+  function _updateAllShopkeeperShareButtons() {
+    document.querySelectorAll('.sk-share-btn').forEach(b => {
+      const oid = parseInt(b.getAttribute('data-order-id'));
+      if (_skSharing && _skCurrentOrderId === oid) {
+        b.innerHTML = '<span class="pulse-dot-green"></span> Live GPS Active (tap to stop)';
+        b.style.background = '#dcfce7';
+        b.style.color = '#15803d';
+        b.style.borderColor = '#86efac';
+        b.style.fontWeight = '800';
+      } else {
+        b.innerHTML = '📍 Start Live GPS Sharing';
+        b.style.background = '#ecfdf5';
+        b.style.color = '#065f46';
+        b.style.borderColor = '#6ee7b7';
+        b.style.fontWeight = '750';
+      }
+    });
+    _renderShopkeeperGPSBanner();
+  }
+
+  function _renderShopkeeperGPSBanner() {
+    let banner = document.getElementById('sk-gps-active-banner');
+    if (!_skSharing || !_skCurrentOrderId) {
+      if (banner) banner.remove();
+      return;
+    }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'sk-gps-active-banner';
+      document.body.appendChild(banner);
+    }
+    banner.innerHTML = `
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="pulse-dot-green"></span>
+        <span>Broadcasting Live GPS for Order #${_skCurrentOrderId}</span>
+      </div>
+      <button onclick="App.toggleShopkeeperLocationSharing(${_skCurrentOrderId})" style="background:rgba(255,255,255,0.25); border:1px solid rgba(255,255,255,0.4); color:#fff; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:800; cursor:pointer;">
+        Stop GPS
+      </button>
+    `;
+  }
 
   function _stopShopkeeperGPS() {
     if (_skWatchId !== null && navigator.geolocation) {
@@ -3251,22 +3438,18 @@ const App = (() => {
     }
     _skSharing = false;
     _skCurrentOrderId = null;
-    // Update button state if it is still in DOM
-    const btn = document.getElementById('sk-share-loc-btn');
-    if (btn) {
-      btn.textContent = '\uD83D\uDCCD Share My Location';
-      btn.style.background = '#ecfdf5';
-      btn.style.color = '#065f46';
-      btn.style.borderColor = '#6ee7b7';
-    }
+    _updateAllShopkeeperShareButtons();
   }
 
   async function toggleShopkeeperLocationSharing(orderId, btn) {
+    orderId = parseInt(orderId);
+    if (!orderId) return;
+
     // If already sharing THIS order — stop
     if (_skSharing && _skCurrentOrderId === orderId) {
       _stopShopkeeperGPS();
       await api('stop_delivery_tracking', { order_id: orderId }, 'POST').catch(() => {});
-      toast('\uD83D\uDCCD Location sharing stopped.');
+      toast('📍 Live location sharing stopped.');
       return;
     }
 
@@ -3276,68 +3459,70 @@ const App = (() => {
     }
 
     if (!navigator.geolocation) {
-      toast('\u26A0\uFE0F Location is not supported by this browser.', 'error');
+      toast('⚠️ Location is not supported by this browser.', 'error');
       return;
     }
 
-    // Update button to indicate pending permission
-    if (btn) {
-      btn.textContent = '\u23F3 Requesting permission...';
-      btn.disabled = true;
-    }
+    // Update buttons to show pending state
+    document.querySelectorAll('.sk-share-btn').forEach(b => {
+      if (parseInt(b.getAttribute('data-order-id')) === orderId) {
+        b.textContent = '⏳ Requesting GPS permission...';
+        b.disabled = true;
+      }
+    });
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
-        // Permission granted — switch to watchPosition
         _skSharing = true;
         _skCurrentOrderId = orderId;
-        if (btn) {
-          btn.textContent = '\uD83D\uDFE2 Sharing Live... (tap to stop)';
-          btn.style.background = '#dcfce7';
-          btn.style.color = '#15803d';
-          btn.style.borderColor = '#86efac';
-          btn.disabled = false;
-        }
-        toast('\uD83D\uDCCD Live location sharing started!');
+        _updateAllShopkeeperShareButtons();
+        document.querySelectorAll('.sk-share-btn').forEach(b => b.disabled = false);
 
-        // Send the first fix immediately
-        const { latitude, longitude, accuracy } = pos.coords;
-        _sendGPSUpdate(orderId, latitude, longitude, accuracy, pos.coords.heading, pos.coords.speed);
+        toast('📍 Live GPS location sharing started! Broadcasting to customer.');
 
-        // Watch for ongoing updates
+        const { latitude, longitude, accuracy, heading, speed } = pos.coords;
+        _sendGPSUpdate(orderId, latitude, longitude, accuracy, heading, speed);
+
         _skWatchId = navigator.geolocation.watchPosition(
           (p) => {
-            if (!_skSharing) { navigator.geolocation.clearWatch(_skWatchId); return; }
-            _sendGPSUpdate(
-              orderId,
-              p.coords.latitude,
-              p.coords.longitude,
-              p.coords.accuracy,
-              p.coords.heading,
-              p.coords.speed
-            );
+            if (!_skSharing) {
+              navigator.geolocation.clearWatch(_skWatchId);
+              return;
+            }
+            const now = Date.now();
+            if (now - _skLastSendTime > 4000) {
+              _skLastSendTime = now;
+              _sendGPSUpdate(
+                orderId,
+                p.coords.latitude,
+                p.coords.longitude,
+                p.coords.accuracy,
+                p.coords.heading,
+                p.coords.speed
+              );
+            }
           },
           (err) => {
             console.warn('[GH GPS watch error]', err.code, err.message);
             if (err.code === err.PERMISSION_DENIED) {
-              toast('Location permission denied. Sharing stopped.', 'error');
+              toast('⚠️ Location permission denied. Sharing stopped.', 'error');
               _stopShopkeeperGPS();
             }
-            // For POSITION_UNAVAILABLE / TIMEOUT — keep watching, just log
           },
           {
             enableHighAccuracy: true,
-            maximumAge: 5000,     // accept a 5-second-old cached fix
+            maximumAge: 3000,
             timeout: 15000
           }
         );
       },
       (err) => {
-        if (btn) { btn.textContent = '\uD83D\uDCCD Share My Location'; btn.disabled = false; }
+        _stopShopkeeperGPS();
+        document.querySelectorAll('.sk-share-btn').forEach(b => b.disabled = false);
         if (err.code === err.PERMISSION_DENIED) {
-          toast('\u26A0\uFE0F Location access was denied. Please allow location in browser settings.', 'error');
+          toast('⚠️ Location access was denied. Please allow location in your mobile browser settings.', 'error');
         } else {
-          toast('\u26A0\uFE0F Could not get your location. Please try again.', 'error');
+          toast('⚠️ Could not obtain GPS location. Please check device location settings.', 'error');
         }
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -4933,7 +5118,16 @@ const App = (() => {
     await loadNotifications();
 
     if (state.role === 'customer') {
-      if (window.location.hash === '#orders') {
+      const h = window.location.hash.replace('#', '');
+      if (h.startsWith('track')) {
+        const orderMatch = h.match(/\d+/);
+        renderCustomerView();
+        if (orderMatch) {
+          setTimeout(() => trackOrder(parseInt(orderMatch[0])), 350);
+        } else {
+          renderCustomerOrdersView('active');
+        }
+      } else if (window.location.hash === '#orders') {
         renderCustomerOrdersView();
       } else if (window.location.hash === '#payments') {
         renderCustomerPaymentsView();
@@ -5051,7 +5245,14 @@ document.addEventListener('DOMContentLoaded', () => {
         App.navigateToShopPage('dashboard');
       }
     } else {
-      if (App.renderCustomerOrdersView && window.location.hash === '#orders') {
+      if (h.startsWith('track')) {
+        const orderMatch = h.match(/\d+/);
+        if (orderMatch && App.trackOrder) {
+          App.trackOrder(parseInt(orderMatch[0]));
+        } else if (App.renderCustomerOrdersView) {
+          App.renderCustomerOrdersView('active');
+        }
+      } else if (App.renderCustomerOrdersView && window.location.hash === '#orders') {
         App.renderCustomerOrdersView();
       } else if (window.location.hash === '#payments') {
         if (App.renderCustomerPaymentsView) App.renderCustomerPaymentsView();
