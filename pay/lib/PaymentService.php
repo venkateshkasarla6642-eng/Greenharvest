@@ -33,10 +33,15 @@ class PaymentService {
         'refunded'   => [],             // Terminal
     ];
 
-    public function __construct(PDO $db) {
+    public function __construct(PDO $db, ?array $mockSettings = null) {
         $this->db       = $db;
         $this->audit    = new AuditLogger($db);
         $this->sandbox  = new SandboxAdapter();
+        if ($mockSettings !== null) {
+            $this->settings = $mockSettings;
+            $this->live     = new LiveAdapter($this->settings);
+            return;
+        }
         $this->ensureSchema();
         $this->settings = $this->loadSettings();
         $this->live     = new LiveAdapter($this->settings);
@@ -82,11 +87,18 @@ class PaymentService {
                 CREATE INDEX IF NOT EXISTS idx_gpl_status ON gh_payment_links(status);
             ");
             // Ensure qr_image_path column is TEXT to store persistent base64 data URIs
+            // And ensure provider-specific columns exist non-destructively
             try {
                 $this->db->exec("
                     ALTER TABLE gh_pay_settings ALTER COLUMN qr_image_path TYPE TEXT;
                     ALTER TABLE shop_settings ADD COLUMN IF NOT EXISTS qr_image_path TEXT DEFAULT '';
                     ALTER TABLE shop_settings ALTER COLUMN qr_image_path TYPE TEXT;
+                    ALTER TABLE gh_pay_settings ADD COLUMN IF NOT EXISTS razorpay_key_id TEXT DEFAULT '';
+                    ALTER TABLE gh_pay_settings ADD COLUMN IF NOT EXISTS razorpay_key_secret TEXT DEFAULT '';
+                    ALTER TABLE gh_pay_settings ADD COLUMN IF NOT EXISTS razorpay_webhook_secret TEXT DEFAULT '';
+                    ALTER TABLE gh_pay_settings ADD COLUMN IF NOT EXISTS cashfree_app_id TEXT DEFAULT '';
+                    ALTER TABLE gh_pay_settings ADD COLUMN IF NOT EXISTS cashfree_secret_key TEXT DEFAULT '';
+                    ALTER TABLE gh_pay_settings ADD COLUMN IF NOT EXISTS cashfree_webhook_secret TEXT DEFAULT '';
                 ");
             } catch (\Throwable $e) {}
 
@@ -175,10 +187,109 @@ class PaymentService {
         return $s;
     }
 
-    public function getSettings(): array {
-        if ($this->isLiveMode()) {
-            $this->settings['mode'] = 'live';
+    /**
+     * Determines the authoritative effective mode and readiness status.
+     * Guaranteed rule:
+     * - Saved effective mode is Sandbox -> status: 'SANDBOX'
+     * - Live mode selected but provider credentials incomplete -> status: 'LIVE NOT READY'
+     * - Live mode saved and required provider credentials present -> status: 'LIVE PRODUCTION'
+     */
+    public function getEffectiveStatus(): array {
+        $mode = $this->settings['mode'] ?? 'sandbox';
+        $envMode = LiveAdapter::getEnvVal('GH_PAY_MODE');
+        if (!empty($envMode) && strtolower(trim($envMode)) === 'live') {
+            $mode = 'live';
         }
+
+        $provider = $this->live->getProviderName();
+        if (($provider === 'none' || empty($provider)) && !empty($this->settings['live_provider'])) {
+            $provider = strtolower(trim($this->settings['live_provider']));
+        }
+        if (empty($provider) || $provider === 'none') {
+            $provider = ($mode === 'live') ? 'razorpay' : 'none';
+        }
+
+        $isConfigured = $this->live->isConfigured();
+        $isTest = $this->live->isTestMode();
+
+        if ($mode === 'live') {
+            if ($isConfigured) {
+                return [
+                    'mode'             => 'live',
+                    'effective_status' => 'LIVE PRODUCTION',
+                    'badge_text'       => 'LIVE PRODUCTION',
+                    'badge_class'      => 'live-mode',
+                    'pill_text'        => '🔴 Live Production',
+                    'is_ready'         => true,
+                    'provider'         => $provider,
+                    'is_test_key'      => $isTest,
+                    'message'          => ucfirst($provider) . ' is configured and ready to process live customer orders.'
+                ];
+            } else {
+                return [
+                    'mode'             => 'live',
+                    'effective_status' => 'LIVE NOT READY',
+                    'badge_text'       => 'LIVE NOT READY',
+                    'badge_class'      => 'warning-mode',
+                    'pill_text'        => '⚠️ Live Not Ready',
+                    'is_ready'         => false,
+                    'provider'         => $provider,
+                    'is_test_key'      => false,
+                    'message'          => ($provider !== 'none' ? ucfirst($provider) : 'Payment provider') . ' credentials are incomplete. Live payments will not activate until valid API credentials are provided.'
+                ];
+            }
+        }
+
+        if ($mode === 'sandbox') {
+            if ($this->live->isRazorpayConfigured() && $this->live->isTestMode()) {
+                return [
+                    'mode'             => 'sandbox',
+                    'effective_status' => 'SANDBOX',
+                    'badge_text'       => 'SANDBOX',
+                    'badge_class'      => 'sandbox-mode',
+                    'pill_text'        => '🧪 Sandbox (Razorpay Test Mode)',
+                    'is_ready'         => true,
+                    'provider'         => 'razorpay',
+                    'is_test_key'      => true,
+                    'message'          => 'Razorpay Test Mode is active and available for customer checkout.'
+                ];
+            }
+            return [
+                'mode'             => 'sandbox',
+                'effective_status' => 'SANDBOX',
+                'badge_text'       => 'SANDBOX',
+                'badge_class'      => 'sandbox-mode',
+                'pill_text'        => '🧪 Sandbox Mode',
+                'is_ready'         => true,
+                'provider'         => $provider,
+                'is_test_key'      => true,
+                'message'          => 'Sandbox testing mode is active. Safe for simulation; no real charges.'
+            ];
+        }
+
+        return [
+            'mode'             => 'sandbox',
+            'effective_status' => 'SANDBOX',
+            'badge_text'       => 'SANDBOX',
+            'badge_class'      => 'sandbox-mode',
+            'pill_text'        => '🧪 Sandbox Mode',
+            'is_ready'         => true,
+            'provider'         => $provider,
+            'is_test_key'      => true,
+            'message'          => 'Sandbox testing mode is active. Safe for simulation; no real charges.'
+        ];
+    }
+
+    public function getSettings(): array {
+        $eff = $this->getEffectiveStatus();
+        $this->settings['mode']             = $eff['mode'];
+        $this->settings['effective_status'] = $eff['effective_status'];
+        $this->settings['badge_text']       = $eff['badge_text'];
+        $this->settings['badge_class']      = $eff['badge_class'];
+        $this->settings['pill_text']        = $eff['pill_text'];
+        $this->settings['live_provider']    = $eff['provider'];
+        $this->settings['has_live_keys']    = $eff['is_ready'];
+        $this->settings['is_test_key']      = $eff['is_test_key'];
         return $this->settings;
     }
 
@@ -187,39 +298,51 @@ class PaymentService {
     }
 
     public function getPublicSettings(): array {
+        $eff = $this->getEffectiveStatus();
         $s = $this->settings;
-        $isLive = $this->isLiveMode();
-        $provider = $this->live->getProviderName();
-        if ($provider === 'none' && !empty($s['live_provider'])) {
-            $provider = $s['live_provider'];
-        }
-        $keyId = $this->live->getKeyId();
-        if (empty($provider) || $provider === 'none') {
-            if ($isLive || (!empty($keyId) && str_starts_with($keyId, 'rzp_'))) {
-                $provider = 'razorpay';
-            }
-        }
+        $isLive = ($eff['mode'] === 'live');
+        $provider = $eff['provider'];
         $hasLiveKeys = $this->live->isConfigured();
-        if (!$hasLiveKeys && !empty($keyId) && str_starts_with($keyId, 'rzp_') && !empty($this->live->getKeySecret())) {
-            $hasLiveKeys = true;
+        $keyId = $this->live->getKeyId();
+        $isRzpConfigured = $this->live->isRazorpayConfigured();
+        $isCfConfigured = $this->live->isCashfreeConfigured();
+
+        // Build dynamic list of enabled methods
+        $methods = ['qr_upi', 'cod'];
+        if ($isRzpConfigured || $hasLiveKeys) {
+            $methods[] = 'razorpay';
+            $methods[] = 'live_upi';
+            $methods[] = 'live_card';
         }
-        if ($isLive && !empty($keyId) && str_starts_with($keyId, 'rzp_')) {
-            $hasLiveKeys = true;
+        if ($isCfConfigured) {
+            $methods[] = 'cashfree';
+            if (!in_array('live_upi', $methods)) $methods[] = 'live_upi';
+        }
+        if (!$isLive) {
+            $methods[] = 'sandbox';
         }
 
         return [
             'success'               => true,
             'enabled'               => (int)($s['manual_verify_enabled'] ?? 1) === 1,
-            'mode'                  => $isLive ? 'live' : ($s['mode'] ?? 'sandbox'),
+            'mode'                  => $eff['mode'],
+            'effective_status'      => $eff['effective_status'],
+            'badge_text'            => $eff['badge_text'],
+            'badge_class'           => $eff['badge_class'],
+            'pill_text'             => $eff['pill_text'],
             'is_sandbox'            => !$isLive,
-            'enabled_methods'       => $s['enabled_methods'] ?? ($isLive ? 'qr_upi,cod,live_upi,live_card' : 'qr_upi,cod,sandbox'),
+            'enabled_methods'       => implode(',', array_unique($methods)),
             'live_provider'         => $provider,
             'has_live_keys'         => $hasLiveKeys,
+            'has_razorpay_keys'     => $isRzpConfigured,
+            'has_cashfree_keys'     => $isCfConfigured,
             'live_key_id'           => $keyId,
+            'razorpay_key_id'       => $this->live->getRazorpayKeyId(),
             'is_test_key'           => $this->live->isTestMode(),
             'upi_id'                => $s['upi_id'] ?? '',
             'qr_image_path'         => $s['qr_image_path'] ?? '',
-            'sandbox_auto_approve'  => (bool)($s['sandbox_auto_approve'] ?? 0)
+            'sandbox_auto_approve'  => (bool)($s['sandbox_auto_approve'] ?? 0),
+            'status_message'        => $eff['message']
         ];
     }
 
@@ -238,8 +361,16 @@ class PaymentService {
     }
 
     public function isMethodEnabled(string $method): bool {
+        $m = strtolower(trim($method));
+        if ($m === 'sandbox' || $m === 'cod' || $m === 'qr_upi') return true;
+        if ($m === 'razorpay' || str_starts_with($m, 'live_')) {
+            return $this->live->isConfigured();
+        }
+        if ($m === 'cashfree') {
+            return $this->live->isCashfreeConfigured();
+        }
         $enabled = explode(',', $this->settings['enabled_methods'] ?? 'qr_upi,cod');
-        return in_array(trim($method), $enabled, true);
+        return in_array($m, array_map('trim', $enabled), true);
     }
 
     // ─── Payment Initiation ──────────────────────────────────────────────────
@@ -387,22 +518,59 @@ class PaymentService {
                 'amount'      => (float)$order['total_amount'],
                 'order_id'    => $orderId
             ]);
-        } elseif (str_starts_with($method, 'live_') && $this->live->isConfigured()) {
-            $providerResult = $this->live->initiatePayment(
-                (float)$order['total_amount'],
-                $paymentRef
-            );
+        } elseif (str_starts_with($method, 'live_') || $method === 'razorpay' || $method === 'cashfree') {
+            $isRzp = ($method === 'razorpay' || ($method === 'live_upi' && $this->live->isRazorpayConfigured()));
+            $isCf  = ($method === 'cashfree' || ($method === 'live_upi' && $this->live->isCashfreeConfigured()));
+            $targetProv = $isRzp ? 'razorpay' : ($isCf ? 'cashfree' : $this->live->getProviderName());
+
+            $canProceed = ($targetProv === 'razorpay' ? $this->live->isRazorpayConfigured() : ($targetProv === 'cashfree' ? $this->live->isCashfreeConfigured() : $this->live->isConfigured()));
+
+            if ($canProceed) {
+                $custStmt = $this->db->prepare("SELECT name, phone, email FROM users WHERE id = ?");
+                $custStmt->execute([$customerId]);
+                $custData = $custStmt->fetch() ?: [];
+
+                $providerResult = $this->live->initiatePayment(
+                    (float)$order['total_amount'],
+                    $paymentRef,
+                    'INR',
+                    [
+                        'customer_id'    => $customerId,
+                        'customer_name'  => $custData['name'] ?? '',
+                        'customer_phone' => $custData['phone'] ?? '',
+                        'customer_email' => $custData['email'] ?? '',
+                        'order_number'   => $orderId,
+                        'provider'       => $targetProv
+                    ]
+                );
+            } else {
+                $providerResult = [
+                    'success' => false,
+                    'error'   => 'Payment provider (' . strtoupper($targetProv) . ') credentials are not configured.'
+                ];
+            }
+        }
+
+        if (empty($providerResult['success'])) {
+            return [
+                'success' => false,
+                'error'   => $providerResult['error'] ?? 'Provider initiation failed.'
+            ];
         }
 
         // Update with provider order ID if available
         if (!empty($providerResult['provider_order_id'])) {
+            $provName = $this->live->getProviderName();
+            if (empty($provName) || $provName === 'none') {
+                $provName = ($method === 'razorpay') ? 'razorpay' : 'sandbox';
+            }
             $upd = $this->db->prepare(
                 "UPDATE gh_payment_attempts
                  SET provider_name = ?, provider_order_id = ?, status = 'pending'
                  WHERE id = ?"
             );
             $upd->execute([
-                $this->isLiveMode() ? $this->live->getProviderName() : 'sandbox',
+                $provName,
                 $providerResult['provider_order_id'],
                 $attemptId
             ]);
@@ -482,9 +650,9 @@ class PaymentService {
                 ];
             }
 
-            // Live mode: authoritative provider verification
+            // Live / Test mode: authoritative provider verification if provider order is present
             $verifiedStatus = $outcome;
-            if ((bool)$attempt['is_sandbox'] === false && $this->isLiveMode()) {
+            if (!empty($attempt['provider_order_id']) && $this->live->isConfigured()) {
                 $liveResult = $this->live->verifyPayment(
                     $attempt['provider_order_id'],
                     $providerPaymentId ?: null,
@@ -849,13 +1017,20 @@ class PaymentService {
             "SELECT COUNT(*) FROM gh_qr_submissions WHERE verification_status = 'pending'"
         )->fetchColumn();
 
+        $eff = $this->getEffectiveStatus();
+
         return [
-            'mode'            => $this->isSandboxMode() ? 'sandbox' : 'live',
-            'by_status'       => $byStatus,
-            'today_paid'      => (float)$todayPaid->fetchColumn(),
-            'pending_qr_queue'=> (int)$pendingQr,
-            'live_provider'   => $this->settings['live_provider'] ?? 'none',
-            'live_configured' => $this->isLiveMode() ? $this->live->isConfigured() : false,
+            'mode'             => $eff['mode'],
+            'effective_status' => $eff['effective_status'],
+            'badge_text'       => $eff['badge_text'],
+            'badge_class'      => $eff['badge_class'],
+            'pill_text'        => $eff['pill_text'],
+            'by_status'        => $byStatus,
+            'today_paid'       => (float)$todayPaid->fetchColumn(),
+            'pending_qr_queue' => (int)$pendingQr,
+            'live_provider'    => $eff['provider'],
+            'live_configured'  => $eff['is_ready'],
+            'status_message'   => $eff['message'],
         ];
     }
 

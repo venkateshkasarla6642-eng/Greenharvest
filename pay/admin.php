@@ -22,11 +22,9 @@ if (!$user || ($user['role'] !== 'owner' && $user['role'] !== 'shopkeeper')) {
 $db = getDB();
 $payService = new PaymentService($db);
 $currentSettings = $payService->getSettings();
-$currentMode = $currentSettings['mode'] ?? 'sandbox';
-$currentProvider = $currentSettings['live_provider'] ?? 'none';
-if ($currentMode === 'live' && ($currentProvider === 'none' || empty($currentProvider))) {
-    $currentProvider = 'razorpay';
-}
+$effStatus = $payService->getEffectiveStatus();
+$currentMode = $effStatus['mode'];
+$currentProvider = $effStatus['provider'];
 
 $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
     $_SESSION['pay_csrf_token'] = bin2hex(random_bytes(32));
@@ -95,12 +93,16 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   </div>
 </aside>
 
-<!-- ═══════════ MOBILE TOP BAR ════ -->
-<div class="pay-topbar" id="payTopbar">
+<!-- ═══════════ TOP BAR (DESKTOP & MOBILE SHARED HEADER) ════ -->
+<header class="pay-topbar" id="payTopbar">
   <button class="pay-topbar-menu" onclick="PayAdmin.toggleSidebar()" aria-label="Toggle menu">☰</button>
   <div class="pay-topbar-title">💳 GreenHarvest Pay</div>
-  <div class="pay-mode-badge <?= $currentMode === 'live' ? 'live-mode' : '' ?>" id="topbarModeBadge"><?= strtoupper($currentMode) ?></div>
-</div>
+  <div class="pay-topbar-actions">
+    <div class="pay-mode-badge <?= htmlspecialchars($effStatus['badge_class']) ?>" id="topbarModeBadge" title="<?= htmlspecialchars($effStatus['message']) ?>">
+      <?= htmlspecialchars($effStatus['badge_text']) ?>
+    </div>
+  </div>
+</header>
 <div class="pay-sidebar-overlay" id="paySidebarOverlay" onclick="PayAdmin.closeSidebar()"></div>
 
 <!-- ═══════════ MAIN CONTENT ═══════ -->
@@ -110,9 +112,9 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   <section id="sec-overview" class="pay-section active">
     <div class="pay-section-header">
       <h1 class="pay-section-title">Payment Overview</h1>
-      <div class="pay-mode-pill <?= $currentMode === 'live' ? 'live-mode' : '' ?>" id="modePill">
+      <div class="pay-mode-pill <?= htmlspecialchars($effStatus['badge_class']) ?>" id="modePill" title="<?= htmlspecialchars($effStatus['message']) ?>">
         <span class="pay-mode-dot"></span>
-        <span id="modePillText"><?= $currentMode === 'live' ? '🔴 Live Mode' : '🧪 Sandbox Mode' ?></span>
+        <span id="modePillText"><?= htmlspecialchars($effStatus['pill_text']) ?></span>
       </div>
     </div>
 
@@ -433,6 +435,10 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   <section id="sec-settings" class="pay-section">
     <div class="pay-section-header">
       <h1 class="pay-section-title">GreenHarvest Pay Settings</h1>
+      <div class="pay-mode-pill <?= htmlspecialchars($effStatus['badge_class']) ?>" id="settingsModePill">
+        <span class="pay-mode-dot"></span>
+        <span id="settingsModePillText"><?= htmlspecialchars($effStatus['pill_text']) ?></span>
+      </div>
     </div>
 
     <div class="pay-card">
@@ -461,12 +467,19 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
                   <span style="font-size:20px;">🔴</span>
                   <strong style="font-size:14.5px;">Live (Production)</strong>
                 </div>
-                <span class="pay-mode-indicator" id="indicatorLive" style="font-size:11px;padding:2px 8px;border-radius:12px;font-weight:700;<?= $currentMode === 'live' ? 'background:#ef4444;color:#fff;' : 'display:none;' ?>">ACTIVE</span>
+                <span class="pay-mode-indicator" id="indicatorLive" style="font-size:11px;padding:2px 8px;border-radius:12px;font-weight:700;<?= $currentMode === 'live' ? ($effStatus['is_ready'] ? 'background:#ef4444;color:#fff;' : 'background:#f59e0b;color:#fff;') : 'display:none;' ?>">
+                  <?= ($currentMode === 'live' && !$effStatus['is_ready']) ? 'CONFIGURATION REQUIRED' : 'ACTIVE' ?>
+                </span>
               </div>
-              <small style="display:block;margin-top:6px;font-size:12px;opacity:0.85;color:var(--pay-text-muted);">Real payments. Collects real customer orders via Razorpay.</small>
+              <small style="display:block;margin-top:6px;font-size:12px;opacity:0.85;color:var(--pay-text-muted);">Real payments. Collects real customer orders via configured gateway.</small>
             </div>
           </div>
           <input type="hidden" name="mode" id="selectedModeInput" value="<?= htmlspecialchars($currentMode) ?>">
+
+          <!-- Live Configuration Alert Banner (shown when Live is active but provider incomplete) -->
+          <div id="liveConfigWarning" class="pay-alert" style="<?= ($currentMode === 'live' && !$effStatus['is_ready']) ? 'display:block;' : 'display:none;' ?>background:rgba(245,158,11,0.12);border:1px solid #f59e0b;color:#b45309;border-radius:10px;padding:12px 14px;margin-top:12px;font-size:13px;line-height:1.5;">
+            ⚠️ <strong>Live Configuration Required:</strong> Live (Production) mode is selected, but valid credentials for <strong id="warnProviderName"><?= htmlspecialchars(ucfirst($currentProvider !== 'none' ? $currentProvider : 'Live Provider')) ?></strong> are incomplete. Real payments cannot be processed until you enter your API credentials below or set them in Render Environment variables.
+          </div>
         </div>
 
         <div class="pay-form-group">
@@ -490,34 +503,76 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
           </select>
         </div>
 
-        <div id="liveProviderFields" style="<?= ($currentProvider && $currentProvider !== 'none') ? 'display:block;' : 'display:none;' ?>">
-          <!-- Credentials Status Indicator -->
-          <div id="credentialsStatusBanner" style="display:none;margin-bottom:14px;border-radius:10px;padding:12px 14px;font-size:13px;"></div>
+        <!-- Credentials Status Indicator -->
+        <div id="credentialsStatusBanner" style="display:none;margin-bottom:14px;border-radius:10px;padding:12px 14px;font-size:13px;"></div>
 
-          <div class="pay-alert pay-alert-warning" style="background:rgba(245,158,11,0.1);border:1px solid #f59e0b;color:#d97706;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;">
-            💡 <strong>API Credentials Guide:</strong><br>
-            You can enter your <strong>Razorpay Key ID &amp; Key Secret</strong> directly below (e.g. <code>rzp_test_...</code>), OR enter the name of your Render environment variables (e.g. <code>GH_LIVE_KEY_ID</code> or <code>RAZORPAY_KEY_ID</code>). Both are fully supported and automatically detected.
+        <!-- ── RAZORPAY CONFIGURATION BLOCK ── -->
+        <div id="providerFieldsRazorpay" class="provider-fields-block" style="<?= ($currentProvider === 'razorpay') ? 'display:block;' : 'display:none;' ?>">
+          <div class="pay-alert pay-alert-warning" style="background:rgba(59,130,246,0.08);border:1px solid #60a5fa;color:#1e40af;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;">
+            💡 <strong>Razorpay API Credentials Guide:</strong><br>
+            Enter your <strong>Razorpay Key ID &amp; Key Secret</strong> from your Razorpay Dashboard (supports both <code>rzp_test_...</code> and <code>rzp_live_...</code>), OR set the name of your Render environment variables (e.g. <code>GH_LIVE_KEY_ID</code>, <code>RAZORPAY_KEY_ID</code>).
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Key ID (e.g. rzp_test_... or Render env var name)</label>
-            <input type="text" name="provider_key_env" id="providerKeyEnv" class="pay-input" placeholder="e.g. rzp_test_... or GH_LIVE_KEY_ID">
+            <label class="pay-label">Razorpay Key ID (e.g. rzp_test_... or Render env var name)</label>
+            <input type="text" name="razorpay_key_id" id="razorpayKeyId" class="pay-input" placeholder="e.g. rzp_test_... or GH_LIVE_KEY_ID">
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Key Secret (API secret or Render env var name)</label>
-            <input type="password" name="provider_secret_env" id="providerSecretEnv" class="pay-input" placeholder="e.g. your_secret or GH_LIVE_KEY_SECRET">
+            <label class="pay-label">Razorpay Key Secret (API secret or Render env var name)</label>
+            <input type="password" name="razorpay_key_secret" id="razorpayKeySecret" class="pay-input" placeholder="e.g. your_secret or GH_LIVE_KEY_SECRET">
           </div>
           <div class="pay-form-group">
-            <label class="pay-label">Webhook Secret (Optional — only needed for webhooks)</label>
-            <input type="text" name="webhook_secret_env" id="webhookSecretEnv" class="pay-input" placeholder="e.g. your_webhook_secret or GH_WEBHOOK_SECRET">
-            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Render env var name: <code>GH_WEBHOOK_SECRET</code> (Optional: not needed for checkout)</div>
+            <label class="pay-label">Razorpay Webhook Secret (Optional — only for webhook verification)</label>
+            <input type="text" name="razorpay_webhook_secret" id="razorpayWebhookSecret" class="pay-input" placeholder="e.g. your_webhook_secret or GH_WEBHOOK_SECRET">
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Render env var name: <code>GH_WEBHOOK_SECRET</code> (Optional)</div>
           </div>
           <div style="margin-top:12px;">
-            <button type="button" class="pay-btn pay-btn-outline pay-btn-sm" onclick="PayAdmin.testRazorpay()" id="btnTestRazorpay" style="padding:8px 16px;">
+            <button type="button" class="pay-btn pay-btn-outline pay-btn-sm" onclick="PayAdmin.testProvider('razorpay')" id="btnTestRazorpay" style="padding:8px 16px;">
               🔌 Test Razorpay Connection
             </button>
-            <div id="testConnectionResult" style="margin-top:8px;font-size:12.5px;display:none;"></div>
           </div>
         </div>
+
+        <!-- ── CASHFREE CONFIGURATION BLOCK ── -->
+        <div id="providerFieldsCashfree" class="provider-fields-block" style="<?= ($currentProvider === 'cashfree') ? 'display:block;' : 'display:none;' ?>">
+          <div class="pay-alert" style="background:rgba(16,185,129,0.08);border:1px solid #34d399;color:#065f46;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;">
+            💡 <strong>Cashfree API Credentials Guide:</strong><br>
+            Enter your <strong>Cashfree App ID (Client ID) &amp; Secret Key (Client Secret)</strong> from your Cashfree Merchant Dashboard, OR set the name of your Render environment variables (e.g. <code>CASHFREE_APP_ID</code>, <code>CASHFREE_SECRET_KEY</code>). Both Sandbox (<code>TEST...</code>) and Production App IDs are supported.
+          </div>
+          <div class="pay-form-group">
+            <label class="pay-label">Cashfree App ID / Client ID (e.g. TEST... or Render env var name)</label>
+            <input type="text" name="cashfree_app_id" id="cashfreeAppId" class="pay-input" placeholder="e.g. TEST1038... or CASHFREE_APP_ID">
+          </div>
+          <div class="pay-form-group">
+            <label class="pay-label">Cashfree Secret Key / Client Secret (API secret or Render env var name)</label>
+            <input type="password" name="cashfree_secret_key" id="cashfreeSecretKey" class="pay-input" placeholder="e.g. your_cashfree_secret or CASHFREE_SECRET_KEY">
+          </div>
+          <div class="pay-form-group">
+            <label class="pay-label">Cashfree Webhook Secret (Optional — only for webhook verification)</label>
+            <input type="text" name="cashfree_webhook_secret" id="cashfreeWebhookSecret" class="pay-input" placeholder="e.g. your_webhook_secret or CASHFREE_WEBHOOK_SECRET">
+            <div style="font-size:11.5px;color:#94a3b8;margin-top:4px;">Render env var name: <code>CASHFREE_WEBHOOK_SECRET</code> (Optional)</div>
+          </div>
+          <div style="margin-top:12px;">
+            <button type="button" class="pay-btn pay-btn-outline pay-btn-sm" onclick="PayAdmin.testProvider('cashfree')" id="btnTestCashfree" style="padding:8px 16px;">
+              🔌 Test Cashfree Connection
+            </button>
+          </div>
+        </div>
+
+        <!-- ── PHONEPE CONFIGURATION BLOCK ── -->
+        <div id="providerFieldsPhonepe" class="provider-fields-block" style="<?= ($currentProvider === 'phonepe') ? 'display:block;' : 'display:none;' ?>">
+          <div class="pay-alert" style="background:rgba(124,58,237,0.08);border:1px solid #a78bfa;color:#5b21b6;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;">
+            ℹ️ <strong>PhonePe Provider Status:</strong><br>
+            PhonePe direct merchant gateway integration is currently in development and coming soon. Please select <strong>Razorpay</strong> or <strong>Cashfree</strong> to accept live online payments immediately.
+          </div>
+        </div>
+
+        <!-- Test Connection Result Feedback -->
+        <div id="testConnectionResult" style="margin-top:12px;font-size:12.5px;display:none;"></div>
+
+        <!-- Hidden legacy inputs for backwards compatibility -->
+        <input type="hidden" name="provider_key_env" id="providerKeyEnv" value="">
+        <input type="hidden" name="provider_secret_env" id="providerSecretEnv" value="">
+        <input type="hidden" name="webhook_secret_env" id="webhookSecretEnv" value="">
 
         <div class="pay-form-group">
           <label class="pay-label">UPI ID (for QR display)</label>

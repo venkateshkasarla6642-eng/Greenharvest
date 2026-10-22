@@ -220,9 +220,18 @@ const GHPay = (function () {
 
   // ── Map payment_method to GHPay method ─────────────────────────────────────
 
-  function mapMethod(method, isSandbox) {
+  function mapMethod(method, isSandbox, settings) {
     const m = (method || '').toLowerCase().trim();
+    if (m === 'razorpay' || m === 'rzp') {
+      return 'razorpay';
+    }
+    if (m === 'card' || m === 'live_card') {
+      return 'razorpay';
+    }
     if (m === 'greenharvestpay' || m === 'greenharvest' || m === 'ghpay') {
+      if (settings && (settings.has_razorpay_keys || settings.has_live_keys || (settings.live_key_id && settings.live_key_id.startsWith('rzp_')))) {
+        return 'razorpay';
+      }
       return isSandbox ? 'sandbox' : 'qr_upi';
     }
     switch (m) {
@@ -234,11 +243,12 @@ const GHPay = (function () {
       case 'cod':
       case 'cash on delivery':
         return 'cod';
-      case 'card':
-        return 'live_card';
       case 'sandbox':
         return 'sandbox';
       default:
+        if (settings && (settings.has_razorpay_keys || settings.has_live_keys || (settings.live_key_id && settings.live_key_id.startsWith('rzp_')))) {
+          return 'razorpay';
+        }
         return isSandbox ? 'sandbox' : 'qr_upi';
     }
   }
@@ -255,7 +265,7 @@ const GHPay = (function () {
     }
 
     const isSandbox = (settings.mode || 'sandbox') === 'sandbox';
-    let ghMethod = mapMethod(paymentMethod, isSandbox);
+    let ghMethod = mapMethod(paymentMethod, isSandbox, settings);
 
     renderCheckoutSheet(orderId, orderNumber, totalAmount, ghMethod, settings, isSandbox);
   }
@@ -280,7 +290,7 @@ const GHPay = (function () {
     }
 
     const enabledMethods = (settings.enabled_methods || 'qr_upi,cod,sandbox').split(',').map(m => m.trim());
-    const methodsHtml = buildMethodsHtml(enabledMethods, initialMethod, isSandbox);
+    const methodsHtml = buildMethodsHtml(enabledMethods, initialMethod, isSandbox, settings);
 
     const html = `
       <div class="ghpay-checkout-wrap" id="ghpayWrap">
@@ -362,8 +372,34 @@ const GHPay = (function () {
     });
   }
 
-  function buildMethodsHtml(enabledMethods, initialMethod, isSandbox) {
+  function buildMethodsHtml(enabledMethods, initialMethod, isSandbox, settings) {
     const methodDefs = [];
+    const isRzpReady = !!(
+      settings?.has_razorpay_keys ||
+      settings?.has_live_keys ||
+      (settings?.live_key_id && settings.live_key_id.startsWith('rzp_')) ||
+      (settings?.live_provider === 'razorpay')
+    );
+    const isTestMode = !!(
+      settings?.is_test_key ||
+      (settings?.live_key_id && settings.live_key_id.startsWith('rzp_test_'))
+    );
+
+    if (isRzpReady) {
+      methodDefs.push({
+        key: 'razorpay',
+        icon: '💳',
+        label: isTestMode ? 'Razorpay (Test Mode)' : 'Razorpay Secure Checkout',
+        sub: isTestMode ? 'UPI, Credit/Debit Cards, Netbanking (Test Mode)' : 'Pay securely via UPI, Cards & Netbanking'
+      });
+    }
+
+    methodDefs.push({
+      key: 'qr_upi',
+      icon: '📱',
+      label: 'Scan & Pay (UPI QR)',
+      sub: 'Scan QR with GPay / PhonePe / Paytm / Any UPI app'
+    });
 
     if (isSandbox) {
       methodDefs.push({
@@ -375,20 +411,6 @@ const GHPay = (function () {
     }
 
     methodDefs.push({
-      key: 'qr_upi',
-      icon: '📱',
-      label: 'Scan & Pay (UPI QR)',
-      sub: 'Scan QR with GPay / PhonePe / Paytm / Any UPI app'
-    });
-
-    methodDefs.push({
-      key: 'live_upi',
-      icon: '⚡',
-      label: 'Instant UPI / Cards',
-      sub: 'Direct payment gateway movement'
-    });
-
-    methodDefs.push({
       key: 'cod',
       icon: '💵',
       label: 'Cash on Delivery',
@@ -398,7 +420,7 @@ const GHPay = (function () {
     // Pick matching or fallback
     let matched = false;
     const items = methodDefs.map(m => {
-      const isSel = (m.key === initialMethod);
+      const isSel = (m.key === initialMethod || (initialMethod === 'live_upi' && m.key === 'razorpay'));
       if (isSel) matched = true;
       return `
         <label class="ghpay-method-opt ${isSel ? 'selected' : ''}">
@@ -415,7 +437,7 @@ const GHPay = (function () {
     // If none matched, check first by default
     if (!matched && methodDefs.length > 0) {
       initialMethod = methodDefs[0].key;
-      return buildMethodsHtml(enabledMethods, initialMethod, isSandbox);
+      return buildMethodsHtml(enabledMethods, initialMethod, isSandbox, settings);
     }
 
     return items.join('');
@@ -497,32 +519,54 @@ const GHPay = (function () {
         }
         break;
 
+      case 'razorpay':
+      case 'razorpay':
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        const isRazorpayReady = !!(
+        const prov = (settings.live_provider || 'razorpay').toLowerCase();
+        const provLabel = prov === 'cashfree' ? 'Cashfree' : 'Razorpay';
+        const isRzp = (prov === 'razorpay') || (settings.live_key_id && settings.live_key_id.startsWith('rzp_')) || settings.has_razorpay_keys;
+        const isTestMode = !!(settings.is_test_key || (settings.live_key_id && settings.live_key_id.startsWith('rzp_test_')));
+        const isProviderReady = !!(
           settings.has_live_keys ||
+          settings.has_razorpay_keys ||
           (settings.live_key_id && settings.live_key_id.startsWith('rzp_')) ||
-          (settings.live_provider === 'razorpay') ||
-          (settings.mode === 'live')
+          (prov === 'cashfree' ? settings.has_cashfree_keys : settings.has_razorpay_keys)
         );
-        if (isRazorpayReady) {
+
+        if (isProviderReady) {
+          const bannerTitle = isRzp
+            ? (isTestMode ? '🧪 Razorpay (Test Mode)' : '💳 Razorpay Standard Checkout')
+            : `⚡ Instant Gateway Ready (${provLabel})`;
+          const bannerDesc = isRzp
+            ? (isTestMode
+                ? 'Razorpay Test Mode is active. You can complete test payments using test UPI IDs, Cards, or Netbanking without real money.'
+                : 'Click below to pay securely via Razorpay standard checkout (UPI, Cards, Netbanking).')
+            : `Click below to pay securely via ${provLabel} checkout (UPI, Cards, Netbanking).`;
+          const btnText = isRzp
+            ? `💳 Pay ₹${parseFloat(amount).toFixed(2)} with Razorpay` + (isTestMode ? ' (Test Mode)' : '')
+            : `💳 Pay ₹${parseFloat(amount).toFixed(2)} Securely`;
+
           container.innerHTML = `
             <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:14px;font-size:13px;color:#166534;margin-top:10px;">
-              ⚡ <strong>Instant Gateway Ready.</strong><br>
-              Click below to pay securely via Razorpay standard checkout (UPI, Cards, Netbanking).
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <strong>${bannerTitle}</strong>
+                ${isTestMode ? '<span style="background:#dbeafe;color:#1e40af;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:4px;border:1px solid #93c5fd;">TEST MODE</span>' : '<span style="background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:4px;border:1px solid #86efac;">SECURE</span>'}
+              </div>
+              <div style="font-size:12px;color:#15803d;line-height:1.4;">${bannerDesc}</div>
             </div>
           `;
           if (payBtn) {
             payBtn.style.display = 'block';
-            payBtn.innerHTML = `💳 Pay ₹${parseFloat(amount).toFixed(2)} Securely`;
+            payBtn.innerHTML = btnText;
             payBtn.disabled = false;
           }
         } else {
           container.innerHTML = `
             <div style="background:#fef9c3;border:1px solid #fde047;border-radius:12px;padding:14px;font-size:13px;color:#713f12;line-height:1.6;margin-top:10px;">
-              ⚡ <strong>Live Payment Provider Notice:</strong><br>
-              The store administrator has not yet configured production provider credentials (Razorpay/Cashfree).<br>
+              ⚡ <strong>Payment Gateway Notice (${provLabel}):</strong><br>
+              The store administrator has not yet configured production credentials for ${provLabel}.<br>
               <div style="margin-top:6px;font-size:12px;">
                 💡 <em>Tip: Switch to <strong>Scan &amp; Pay (UPI QR)</strong> or <strong>Cash on Delivery</strong> above to complete your fresh vegetable order immediately.</em>
               </div>
@@ -595,12 +639,15 @@ const GHPay = (function () {
         _showSuccess(paymentRef, 'Cash on Delivery confirmed! Please keep ₹' + parseFloat(s.amount).toFixed(2) + ' ready upon delivery.');
         break;
 
+      case 'razorpay':
       case 'live_upi':
       case 'live_card':
       case 'live_netbanking':
-        const rzpKey = initiateRes.key_id || _cachedSettings?.live_key_id;
-        if ((initiateRes.provider === 'razorpay' || rzpKey) && rzpKey) {
-          initiateRes.key_id = rzpKey;
+        if (initiateRes.provider === 'cashfree' || initiateRes.payment_session_id) {
+          _openCashfree(initiateRes, s, paymentRef);
+        } else if (initiateRes.provider === 'razorpay' || initiateRes.key_id) {
+          const rzpKey = initiateRes.key_id || _cachedSettings?.live_key_id;
+          if (rzpKey) initiateRes.key_id = rzpKey;
           _openRazorpay(initiateRes, s, paymentRef);
         } else {
           _showError('Live payment provider credentials are not configured. Please choose UPI QR or COD.');
@@ -734,6 +781,71 @@ const GHPay = (function () {
     };
 
     new window.Razorpay(options).open();
+  }
+
+  // ── Cashfree live checkout ────────────────────────────────────────────────
+
+  async function _ensureCashfree() {
+    if (typeof window !== 'undefined' && window.Cashfree) return true;
+    return new Promise((resolve) => {
+      const s = document.createElement('script');
+      s.src = 'https://sdk.cashfree.com/js/v3/cashfree.js';
+      s.onload = () => resolve(true);
+      s.onerror = () => resolve(false);
+      document.head.appendChild(s);
+    });
+  }
+
+  async function _openCashfree(providerData, state, paymentRef) {
+    if (!window.Cashfree) {
+      const ok = await _ensureCashfree();
+      if (!ok || !window.Cashfree) {
+        _showError('Cashfree checkout SDK could not be loaded. Please check your internet connection.');
+        const btn = document.getElementById('ghpayPayBtn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Retry Payment'; }
+        return;
+      }
+    }
+
+    try {
+      const isSandboxEnv = (providerData.cf_environment === 'sandbox' || state.isSandbox);
+      const cashfree = window.Cashfree({
+        mode: isSandboxEnv ? 'sandbox' : 'production'
+      });
+
+      const checkoutOptions = {
+        paymentSessionId: providerData.payment_session_id,
+        redirectTarget: '_modal'
+      };
+
+      cashfree.checkout(checkoutOptions).then(async function (result) {
+        if (result.error) {
+          console.warn('[GHPay] Cashfree checkout error:', result.error);
+          _showError(result.error.message || 'Payment attempt was cancelled or failed.');
+          const btn = document.getElementById('ghpayPayBtn');
+          if (btn) { btn.disabled = false; btn.textContent = 'Retry Payment'; }
+          return;
+        }
+
+        // Verify status server-side
+        const orderId = providerData.provider_order_id;
+        const verifyRes = await payPost('initiate_payment_live_callback', {
+          payment_ref:       paymentRef,
+          cashfree_order_id: orderId
+        });
+
+        if (verifyRes.success && verifyRes.verified_status === 'paid') {
+          _showSuccess(paymentRef, 'Payment verified and confirmed via Cashfree!');
+        } else {
+          _showPending(paymentRef, 'Payment received. Awaiting server confirmation.');
+        }
+      });
+    } catch (err) {
+      console.error('[GHPay] Cashfree initialization exception:', err);
+      _showError('Could not initialize Cashfree checkout. Please try again or use UPI QR.');
+      const btn = document.getElementById('ghpayPayBtn');
+      if (btn) { btn.disabled = false; btn.textContent = 'Retry Payment'; }
+    }
   }
 
   // ── Status screens ────────────────────────────────────────────────────────

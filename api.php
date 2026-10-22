@@ -523,47 +523,27 @@ switch ($action) {
     // --- GREENHARVEST PAY GATEWAY ADMIN ---
     case 'get_pay_gateway_status':
         checkShopkeeperRole();
-        try {
-            $stmt = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1");
-            $paySet = $stmt ? $stmt->fetch() : null;
-        } catch (\Throwable $e) {
-            $paySet = null;
-        }
-
-        if (!$paySet) {
-            $paySet = [
-                'id' => 1,
-                'mode' => 'sandbox',
-                'live_provider' => 'none',
-                'enabled_methods' => 'qr_upi,cod,sandbox',
-                'provider_key_env' => 'GH_LIVE_KEY_ID',
-                'provider_secret_env' => 'GH_LIVE_KEY_SECRET',
-                'webhook_secret_env' => 'GH_WEBHOOK_SECRET',
-                'upi_id' => '',
-                'manual_verify_enabled' => 1,
-                'sandbox_auto_approve' => 0
-            ];
-        }
-
-        $keyEnv = $paySet['provider_key_env'] ?: 'GH_LIVE_KEY_ID';
-        $hasKey = str_starts_with($keyEnv, 'rzp_') || !empty(getenv($keyEnv)) || !empty($_ENV[$keyEnv]) || !empty($_SERVER[$keyEnv]) || !empty(getenv('GH_LIVE_KEY_ID')) || !empty(getenv('RAZORPAY_KEY_ID'));
-        $secEnv = $paySet['provider_secret_env'] ?: 'GH_LIVE_KEY_SECRET';
-        $hasSec = (!empty($secEnv) && !str_contains($secEnv, '•••')) || !empty(getenv($secEnv)) || !empty($_ENV[$secEnv]) || !empty($_SERVER[$secEnv]) || !empty(getenv('GH_LIVE_KEY_SECRET')) || !empty(getenv('RAZORPAY_KEY_SECRET'));
+        require_once __DIR__ . '/pay/lib/PaymentService.php';
+        $payService = new PaymentService($db);
+        $pub = $payService->getPublicSettings();
+        $live = $payService->getLiveAdapter();
 
         jsonResponse([
             'success' => true,
             'gateway' => [
-                'mode' => $paySet['mode'] ?? 'sandbox',
-                'live_provider' => $paySet['live_provider'] ?? 'none',
-                'enabled_methods' => $paySet['enabled_methods'] ?? 'qr_upi,cod,sandbox',
-                'provider_key_env' => $keyEnv,
-                'provider_secret_env' => $secEnv,
-                'webhook_secret_env' => $paySet['webhook_secret_env'] ?? 'GH_WEBHOOK_SECRET',
-                'upi_id' => $paySet['upi_id'] ?? '',
-                'manual_verify_enabled' => (int)($paySet['manual_verify_enabled'] ?? 1),
-                'sandbox_auto_approve' => (int)($paySet['sandbox_auto_approve'] ?? 0),
-                'has_live_keys' => ($hasKey && $hasSec),
-                'admin_url' => 'pay/admin.php'
+                'mode'                  => $pub['mode'],
+                'effective_status'      => $pub['effective_status'],
+                'badge_text'            => $pub['badge_text'],
+                'badge_class'           => $pub['badge_class'],
+                'live_provider'         => $pub['live_provider'],
+                'enabled_methods'       => $pub['enabled_methods'],
+                'has_live_keys'         => $pub['has_live_keys'],
+                'is_test_key'           => $pub['is_test_key'],
+                'upi_id'                => $pub['upi_id'],
+                'manual_verify_enabled' => (int)$pub['enabled'],
+                'sandbox_auto_approve'  => (int)$pub['sandbox_auto_approve'],
+                'status_message'        => $pub['status_message'],
+                'admin_url'             => 'pay/admin.php'
             ]
         ]);
         break;

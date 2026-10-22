@@ -308,14 +308,15 @@ switch ($action) {
         break;
 
     /**
-     * Customer live payment callback verification.
-     * POST: payment_ref, razorpay_payment_id, razorpay_order_id, razorpay_signature
+     * Customer live payment callback verification (Razorpay & Cashfree).
+     * POST: payment_ref, razorpay_payment_id, razorpay_order_id, razorpay_signature, cashfree_order_id
      */
     case 'initiate_payment_live_callback':
         $u = payRequireAuth();
         $paymentRef        = preg_replace('/[^A-Za-z0-9\-]/', '', $_POST['payment_ref'] ?? '');
         $razorpayPaymentId = trim($_POST['razorpay_payment_id'] ?? '');
         $razorpaySignature = trim($_POST['razorpay_signature'] ?? '');
+        $cashfreeOrderId   = trim($_POST['cashfree_order_id'] ?? '');
 
         if (empty($paymentRef)) {
             jsonResponse(['error' => 'Missing payment reference.'], 400);
@@ -332,7 +333,8 @@ switch ($action) {
             jsonResponse(['error' => 'Unauthorized.'], 403);
         }
 
-        $result = $payService->verifyPayment((int)$attempt['id'], (int)$u['id'], 'paid', $razorpayPaymentId, $razorpaySignature);
+        $providerPaymentId = $razorpayPaymentId ?: $cashfreeOrderId;
+        $result = $payService->verifyPayment((int)$attempt['id'], (int)$u['id'], 'paid', $providerPaymentId, $razorpaySignature);
         jsonResponse($result);
         break;
 
@@ -634,38 +636,58 @@ switch ($action) {
         payRequireOwner();
         $settings = $payService->getSettings();
         $live = $payService->getLiveAdapter();
-        $keyId = $live->getKeyId();
-        $hasLiveKeys = $live->isConfigured();
-        $keyPreview = '';
-        if (!empty($keyId)) {
-            $keyPreview = strlen($keyId) > 12
-                ? (substr($keyId, 0, 8) . '...' . substr($keyId, -4))
-                : $keyId;
-        }
+        $eff = $payService->getEffectiveStatus();
 
-        // Auto-display detected key so inputs are never mysteriously blank
-        $displayKey = $settings['provider_key_env'] ?? '';
-        if (empty($displayKey) && !empty($keyId)) {
-            $displayKey = $keyId;
-        }
+        $rzpKey = $live->getRazorpayKeyId();
+        $rzpSec = $live->getRazorpayKeySecret();
+        $rzpWh  = $live->getRazorpayWebhookSecret();
+        $hasRzp = !empty($rzpKey) && !empty($rzpSec);
 
-        // Never expose secrets — return only non-sensitive fields
+        $cfApp = $live->getCashfreeAppId();
+        $cfSec = $live->getCashfreeSecretKey();
+        $cfWh  = $live->getCashfreeWebhookSecret();
+        $hasCf = !empty($cfApp) && !empty($cfSec);
+
+        $activeProvider = $eff['provider'];
+        $hasLiveKeys = $eff['is_ready'];
+
+        // Never expose secrets — return only non-sensitive masked fields
         $safe = [
-            'id'                   => $settings['id'] ?? 1,
-            'mode'                 => $settings['mode'] ?? 'sandbox',
-            'enabled_methods'      => $settings['enabled_methods'] ?? 'qr_upi,cod',
-            'live_provider'        => $live->getProviderName() !== 'none' ? $live->getProviderName() : ($settings['live_provider'] ?? 'none'),
-            'provider_key_env'     => $displayKey,
-            'provider_secret_env'  => !empty($settings['provider_secret_env']) ? $settings['provider_secret_env'] : (!empty($live->getKeySecret()) ? '••••••••' : ''),
-            'webhook_secret_env'   => $settings['webhook_secret_env'] ?? '',
-            'has_live_keys'        => $hasLiveKeys,
-            'key_id_preview'       => $keyPreview,
-            'is_test_key'          => $live->isTestMode(),
-            'upi_id'               => $settings['upi_id'] ?? '',
-            'qr_image_path'        => $settings['qr_image_path'] ?? '',
-            'manual_verify_enabled'=> (int)($settings['manual_verify_enabled'] ?? 1),
-            'sandbox_auto_approve' => (int)($settings['sandbox_auto_approve'] ?? 0),
-            'updated_at'           => $settings['updated_at'] ?? null,
+            'id'                      => $settings['id'] ?? 1,
+            'mode'                    => $eff['mode'],
+            'effective_status'        => $eff['effective_status'],
+            'badge_text'              => $eff['badge_text'],
+            'badge_class'             => $eff['badge_class'],
+            'pill_text'               => $eff['pill_text'],
+            'status_message'          => $eff['message'],
+            'is_ready'                => $eff['is_ready'],
+            'enabled_methods'         => $settings['enabled_methods'] ?? 'qr_upi,cod',
+            'live_provider'           => $activeProvider,
+            'has_live_keys'           => $hasLiveKeys,
+
+            // Razorpay specific
+            'razorpay_key_id'         => $rzpKey,
+            'razorpay_key_secret'     => !empty($rzpSec) ? '••••••••' : '',
+            'razorpay_webhook_secret' => !empty($rzpWh) ? '••••••••' : '',
+            'has_razorpay_keys'       => $hasRzp,
+            'is_razorpay_test'        => str_starts_with($rzpKey, 'rzp_test_'),
+
+            // Cashfree specific
+            'cashfree_app_id'         => $cfApp,
+            'cashfree_secret_key'     => !empty($cfSec) ? '••••••••' : '',
+            'cashfree_webhook_secret' => !empty($cfWh) ? '••••••••' : '',
+            'has_cashfree_keys'       => $hasCf,
+            'is_cashfree_test'        => (str_starts_with(strtoupper($cfApp), 'TEST') || str_contains(strtoupper($cfApp), 'TEST')),
+
+            // General & fallback fields
+            'provider_key_env'        => $activeProvider === 'cashfree' ? $cfApp : $rzpKey,
+            'provider_secret_env'     => ($activeProvider === 'cashfree' ? !empty($cfSec) : !empty($rzpSec)) ? '••••••••' : '',
+            'webhook_secret_env'      => ($activeProvider === 'cashfree' ? !empty($cfWh) : !empty($rzpWh)) ? '••••••••' : '',
+            'upi_id'                  => $settings['upi_id'] ?? '',
+            'qr_image_path'           => $settings['qr_image_path'] ?? '',
+            'manual_verify_enabled'   => (int)($settings['manual_verify_enabled'] ?? 1),
+            'sandbox_auto_approve'    => (int)($settings['sandbox_auto_approve'] ?? 0),
+            'updated_at'              => $settings['updated_at'] ?? null,
         ];
         jsonResponse(['success' => true, 'settings' => $safe]);
         break;
@@ -676,13 +698,29 @@ switch ($action) {
 
         $mode                 = trim($_POST['mode'] ?? 'sandbox');
         $enabled_methods      = trim($_POST['enabled_methods'] ?? 'qr_upi,cod');
-        $live_provider        = trim($_POST['live_provider'] ?? 'none');
-        $provider_key_env     = trim($_POST['provider_key_env'] ?? '');
-        $provider_secret_env  = trim($_POST['provider_secret_env'] ?? '');
-        $webhook_secret_env   = trim($_POST['webhook_secret_env'] ?? '');
+        $live_provider        = strtolower(trim($_POST['live_provider'] ?? 'none'));
         $upi_id               = trim($_POST['upi_id'] ?? '');
         $manual_verify        = isset($_POST['manual_verify_enabled']) ? 1 : 0;
         $sandbox_auto         = isset($_POST['sandbox_auto_approve']) ? 1 : 0;
+
+        // Provider-specific credentials
+        $razorpay_key_id         = trim($_POST['razorpay_key_id'] ?? $_POST['provider_key_env'] ?? '');
+        $razorpay_key_secret     = trim($_POST['razorpay_key_secret'] ?? $_POST['provider_secret_env'] ?? '');
+        $razorpay_webhook_secret = trim($_POST['razorpay_webhook_secret'] ?? $_POST['webhook_secret_env'] ?? '');
+
+        $cashfree_app_id         = trim($_POST['cashfree_app_id'] ?? '');
+        $cashfree_secret_key     = trim($_POST['cashfree_secret_key'] ?? '');
+        $cashfree_webhook_secret = trim($_POST['cashfree_webhook_secret'] ?? '');
+
+        // If provider is cashfree and form submitted generic provider_key_env
+        if ($live_provider === 'cashfree') {
+            if (empty($cashfree_app_id) && !empty($_POST['provider_key_env']) && !str_starts_with($_POST['provider_key_env'], 'rzp_')) {
+                $cashfree_app_id = trim($_POST['provider_key_env']);
+            }
+            if (empty($cashfree_secret_key) && !empty($_POST['provider_secret_env']) && !str_contains($_POST['provider_secret_env'], '•••')) {
+                $cashfree_secret_key = trim($_POST['provider_secret_env']);
+            }
+        }
 
         // Preserve existing keys in DB if form submitted blank or with masked placeholder
         $currentSettings = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1")->fetch();
@@ -690,22 +728,33 @@ switch ($action) {
             $db->exec("INSERT INTO gh_pay_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING");
             $currentSettings = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1")->fetch() ?: [];
         }
-        if (empty($provider_key_env) && !empty($currentSettings['provider_key_env'])) {
-            $provider_key_env = $currentSettings['provider_key_env'];
-        }
-        if ((empty($provider_secret_env) || str_contains($provider_secret_env, '•••')) && !empty($currentSettings['provider_secret_env'])) {
-            $provider_secret_env = $currentSettings['provider_secret_env'];
-        }
-        if (empty($webhook_secret_env) && !empty($currentSettings['webhook_secret_env'])) {
-            $webhook_secret_env = $currentSettings['webhook_secret_env'];
+
+        // Preserve Razorpay credentials
+        if (empty($razorpay_key_id) && !empty($currentSettings['razorpay_key_id'])) {
+            $razorpay_key_id = $currentSettings['razorpay_key_id'];
+        } elseif (empty($razorpay_key_id) && !empty($currentSettings['provider_key_env']) && str_starts_with($currentSettings['provider_key_env'], 'rzp_')) {
+            $razorpay_key_id = $currentSettings['provider_key_env'];
         }
 
-        if (str_starts_with($provider_key_env, 'rzp_') && ($live_provider === 'none' || empty($live_provider))) {
-            $live_provider = 'razorpay';
+        if ((empty($razorpay_key_secret) || str_contains($razorpay_key_secret, '•••')) && !empty($currentSettings['razorpay_key_secret'])) {
+            $razorpay_key_secret = $currentSettings['razorpay_key_secret'];
+        } elseif ((empty($razorpay_key_secret) || str_contains($razorpay_key_secret, '•••')) && !empty($currentSettings['provider_secret_env']) && !str_contains($currentSettings['provider_secret_env'], '•••')) {
+            $razorpay_key_secret = $currentSettings['provider_secret_env'];
         }
 
-        if ($mode === 'live' && ($live_provider === 'none' || empty($live_provider))) {
-            $live_provider = 'razorpay';
+        if ((empty($razorpay_webhook_secret) || str_contains($razorpay_webhook_secret, '•••')) && !empty($currentSettings['razorpay_webhook_secret'])) {
+            $razorpay_webhook_secret = $currentSettings['razorpay_webhook_secret'];
+        }
+
+        // Preserve Cashfree credentials
+        if (empty($cashfree_app_id) && !empty($currentSettings['cashfree_app_id'])) {
+            $cashfree_app_id = $currentSettings['cashfree_app_id'];
+        }
+        if ((empty($cashfree_secret_key) || str_contains($cashfree_secret_key, '•••')) && !empty($currentSettings['cashfree_secret_key'])) {
+            $cashfree_secret_key = $currentSettings['cashfree_secret_key'];
+        }
+        if ((empty($cashfree_webhook_secret) || str_contains($cashfree_webhook_secret, '•••')) && !empty($currentSettings['cashfree_webhook_secret'])) {
+            $cashfree_webhook_secret = $currentSettings['cashfree_webhook_secret'];
         }
 
         if (!in_array($mode, ['sandbox', 'live'])) {
@@ -715,6 +764,11 @@ switch ($action) {
             jsonResponse(['error' => 'Invalid provider.'], 400);
         }
 
+        // Set active provider keys for legacy columns
+        $activeKey = ($live_provider === 'cashfree') ? $cashfree_app_id : $razorpay_key_id;
+        $activeSec = ($live_provider === 'cashfree') ? $cashfree_secret_key : $razorpay_key_secret;
+        $activeWh  = ($live_provider === 'cashfree') ? $cashfree_webhook_secret : $razorpay_webhook_secret;
+
         // Validate enabled_methods
         $validMethods = ['qr_upi', 'cod', 'sandbox', 'live_upi', 'live_card', 'live_netbanking'];
         $methods = array_filter(explode(',', $enabled_methods), fn($m) => in_array(trim($m), $validMethods));
@@ -723,17 +777,25 @@ switch ($action) {
         $stmt = $db->prepare(
             "INSERT INTO gh_pay_settings (
                id, mode, enabled_methods, live_provider,
+               razorpay_key_id, razorpay_key_secret, razorpay_webhook_secret,
+               cashfree_app_id, cashfree_secret_key, cashfree_webhook_secret,
                provider_key_env, provider_secret_env, webhook_secret_env,
                upi_id, manual_verify_enabled, sandbox_auto_approve,
                updated_at, updated_by_user_id
-             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
              ON CONFLICT (id) DO UPDATE SET
                mode = EXCLUDED.mode,
                enabled_methods = EXCLUDED.enabled_methods,
                live_provider = EXCLUDED.live_provider,
-               provider_key_env = COALESCE(EXCLUDED.provider_key_env, gh_pay_settings.provider_key_env),
-               provider_secret_env = COALESCE(EXCLUDED.provider_secret_env, gh_pay_settings.provider_secret_env),
-               webhook_secret_env = COALESCE(EXCLUDED.webhook_secret_env, gh_pay_settings.webhook_secret_env),
+               razorpay_key_id = COALESCE(NULLIF(EXCLUDED.razorpay_key_id, ''), gh_pay_settings.razorpay_key_id),
+               razorpay_key_secret = COALESCE(NULLIF(EXCLUDED.razorpay_key_secret, ''), gh_pay_settings.razorpay_key_secret),
+               razorpay_webhook_secret = COALESCE(NULLIF(EXCLUDED.razorpay_webhook_secret, ''), gh_pay_settings.razorpay_webhook_secret),
+               cashfree_app_id = COALESCE(NULLIF(EXCLUDED.cashfree_app_id, ''), gh_pay_settings.cashfree_app_id),
+               cashfree_secret_key = COALESCE(NULLIF(EXCLUDED.cashfree_secret_key, ''), gh_pay_settings.cashfree_secret_key),
+               cashfree_webhook_secret = COALESCE(NULLIF(EXCLUDED.cashfree_webhook_secret, ''), gh_pay_settings.cashfree_webhook_secret),
+               provider_key_env = COALESCE(NULLIF(EXCLUDED.provider_key_env, ''), gh_pay_settings.provider_key_env),
+               provider_secret_env = COALESCE(NULLIF(EXCLUDED.provider_secret_env, ''), gh_pay_settings.provider_secret_env),
+               webhook_secret_env = COALESCE(NULLIF(EXCLUDED.webhook_secret_env, ''), gh_pay_settings.webhook_secret_env),
                upi_id = COALESCE(EXCLUDED.upi_id, gh_pay_settings.upi_id),
                manual_verify_enabled = EXCLUDED.manual_verify_enabled,
                sandbox_auto_approve = EXCLUDED.sandbox_auto_approve,
@@ -742,7 +804,9 @@ switch ($action) {
         );
         $stmt->execute([
             $mode, $enabled_methods, $live_provider,
-            $provider_key_env ?: null, $provider_secret_env ?: null, $webhook_secret_env ?: null,
+            $razorpay_key_id ?: null, $razorpay_key_secret ?: null, $razorpay_webhook_secret ?: null,
+            $cashfree_app_id ?: null, $cashfree_secret_key ?: null, $cashfree_webhook_secret ?: null,
+            $activeKey ?: null, $activeSec ?: null, $activeWh ?: null,
             $upi_id ?: null, $manual_verify, $sandbox_auto,
             $owner['id']
         ]);
@@ -754,15 +818,31 @@ switch ($action) {
             } catch (\Throwable $e) {}
         }
 
+        // Re-read authoritative effective status after update
+        $updatedPayService = new PaymentService($db);
+        $eff = $updatedPayService->getEffectiveStatus();
+
         // Audit the settings change
         $auditLogger = new AuditLogger($db);
         $auditLogger->log('settings_updated', [
-            'mode'            => $mode,
-            'live_provider'   => $live_provider,
-            'enabled_methods' => $enabled_methods
+            'mode'             => $mode,
+            'live_provider'    => $live_provider,
+            'effective_status' => $eff['effective_status'],
+            'enabled_methods'  => $enabled_methods
         ], $owner['id'], 'settings', 1);
 
-        jsonResponse(['success' => true, 'message' => 'GreenHarvest Pay settings updated.']);
+        jsonResponse([
+            'success'          => true,
+            'message'          => 'GreenHarvest Pay settings saved successfully.',
+            'effective_status' => $eff['effective_status'],
+            'badge_text'       => $eff['badge_text'],
+            'badge_class'      => $eff['badge_class'],
+            'pill_text'        => $eff['pill_text'],
+            'is_ready'         => $eff['is_ready'],
+            'mode'             => $eff['mode'],
+            'provider'         => $eff['provider'],
+            'status_message'   => $eff['message']
+        ]);
         break;
 
     /**
@@ -777,68 +857,105 @@ switch ($action) {
             jsonResponse(['error' => 'Invalid mode.'], 400);
         }
 
-        // Guaranteed PostgreSQL UPSERT: creates row 1 if missing and updates mode + provider atomically
+        // Guaranteed PostgreSQL UPSERT: preserves existing live_provider selection (e.g. cashfree or razorpay)
         $db->prepare("
             INSERT INTO gh_pay_settings (id, mode, live_provider, updated_at, updated_by_user_id)
-            VALUES (1, ?, CASE WHEN ? = 'live' THEN 'razorpay' ELSE 'none' END, NOW(), ?)
+            VALUES (1, ?, 'razorpay', NOW(), ?)
             ON CONFLICT (id) DO UPDATE SET
               mode = EXCLUDED.mode,
-              live_provider = CASE WHEN EXCLUDED.mode = 'live' AND (gh_pay_settings.live_provider IS NULL OR gh_pay_settings.live_provider = 'none') THEN 'razorpay' ELSE gh_pay_settings.live_provider END,
+              live_provider = CASE
+                WHEN gh_pay_settings.live_provider IS NULL OR gh_pay_settings.live_provider = 'none' OR gh_pay_settings.live_provider = ''
+                THEN 'razorpay'
+                ELSE gh_pay_settings.live_provider
+              END,
               updated_at = NOW(),
               updated_by_user_id = EXCLUDED.updated_by_user_id
-        ")->execute([$targetMode, $targetMode, $owner['id']]);
+        ")->execute([$targetMode, $owner['id']]);
+
+        $updatedPayService = new PaymentService($db);
+        $eff = $updatedPayService->getEffectiveStatus();
 
         $auditLogger = new AuditLogger($db);
-        $auditLogger->log('mode_switched', ['mode' => $targetMode], $owner['id'], 'settings', 1);
+        $auditLogger->log('mode_switched', [
+            'mode'             => $targetMode,
+            'effective_status' => $eff['effective_status']
+        ], $owner['id'], 'settings', 1);
 
-        jsonResponse(['success' => true, 'mode' => $targetMode]);
+        jsonResponse([
+            'success'          => true,
+            'mode'             => $eff['mode'],
+            'effective_status' => $eff['effective_status'],
+            'badge_text'       => $eff['badge_text'],
+            'badge_class'      => $eff['badge_class'],
+            'pill_text'        => $eff['pill_text'],
+            'is_ready'         => $eff['is_ready'],
+            'provider'         => $eff['provider'],
+            'status_message'   => $eff['message']
+        ]);
         break;
 
     /**
-     * Test Razorpay API connection (owner only).
-     * POST: key_id (optional), key_secret (optional)
+     * Test payment provider API connection (owner only).
+     * Supports both Razorpay and Cashfree testing.
+     * POST: provider ('razorpay'|'cashfree'), key_id, key_secret
      */
+    case 'owner_test_provider':
     case 'owner_test_razorpay':
         payRequireOwner();
+        $testProvider = strtolower(trim($_POST['provider'] ?? 'razorpay'));
+        if (empty($testProvider) || $testProvider === 'none') {
+            $testProvider = 'razorpay';
+        }
         $testKey    = trim($_POST['key_id'] ?? '');
         $testSecret = trim($_POST['key_secret'] ?? '');
 
-        if (!empty($testKey) && !empty($testSecret) && !str_contains($testSecret, '•••')) {
-            $testAdapter = new LiveAdapter([
-                'live_provider'       => 'razorpay',
-                'provider_key_env'    => $testKey,
-                'provider_secret_env' => $testSecret
-            ]);
-            $res = $testAdapter->testConnection();
-            if ($res['success']) {
-                try {
+        $currentSettings = $db->query("SELECT * FROM gh_pay_settings WHERE id = 1")->fetch() ?: [];
+
+        // Build adapter config for testing
+        $testConfig = [
+            'live_provider' => $testProvider
+        ];
+
+        if ($testProvider === 'cashfree') {
+            $testConfig['cashfree_app_id'] = (!empty($testKey)) ? $testKey : ($currentSettings['cashfree_app_id'] ?? '');
+            $testConfig['cashfree_secret_key'] = (!empty($testSecret) && !str_contains($testSecret, '•••')) ? $testSecret : ($currentSettings['cashfree_secret_key'] ?? '');
+        } else {
+            $testConfig['razorpay_key_id'] = (!empty($testKey)) ? $testKey : ($currentSettings['razorpay_key_id'] ?? $currentSettings['provider_key_env'] ?? '');
+            $testConfig['razorpay_key_secret'] = (!empty($testSecret) && !str_contains($testSecret, '•••')) ? $testSecret : ($currentSettings['razorpay_key_secret'] ?? $currentSettings['provider_secret_env'] ?? '');
+        }
+
+        $testAdapter = new LiveAdapter($testConfig);
+        $res = $testAdapter->testConnection($testProvider);
+
+        if ($res['success']) {
+            // Persist valid tested credentials in DB atomically
+            try {
+                if ($testProvider === 'cashfree' && !empty($testKey) && !empty($testSecret) && !str_contains($testSecret, '•••')) {
                     $db->prepare("
-                        INSERT INTO gh_pay_settings (id, mode, live_provider, provider_key_env, provider_secret_env, updated_at)
-                        VALUES (1, 'live', 'razorpay', ?, ?, NOW())
+                        INSERT INTO gh_pay_settings (id, live_provider, cashfree_app_id, cashfree_secret_key, updated_at)
+                        VALUES (1, 'cashfree', ?, ?, NOW())
                         ON CONFLICT (id) DO UPDATE SET
-                            mode = 'live',
-                            live_provider = 'razorpay',
-                            provider_key_env = COALESCE(NULLIF(EXCLUDED.provider_key_env, ''), gh_pay_settings.provider_key_env),
-                            provider_secret_env = COALESCE(NULLIF(EXCLUDED.provider_secret_env, ''), gh_pay_settings.provider_secret_env),
+                            live_provider = 'cashfree',
+                            cashfree_app_id = EXCLUDED.cashfree_app_id,
+                            cashfree_secret_key = EXCLUDED.cashfree_secret_key,
                             updated_at = NOW()
                     ")->execute([$testKey, $testSecret]);
-                } catch (\Throwable $e) {}
-            }
-        } else {
-            $res = $payService->getLiveAdapter()->testConnection();
-            if ($res['success']) {
-                try {
+                } elseif ($testProvider === 'razorpay' && !empty($testKey) && !empty($testSecret) && !str_contains($testSecret, '•••')) {
                     $db->prepare("
-                        INSERT INTO gh_pay_settings (id, mode, live_provider, updated_at)
-                        VALUES (1, 'live', 'razorpay', NOW())
+                        INSERT INTO gh_pay_settings (id, live_provider, razorpay_key_id, razorpay_key_secret, provider_key_env, provider_secret_env, updated_at)
+                        VALUES (1, 'razorpay', ?, ?, ?, ?, NOW())
                         ON CONFLICT (id) DO UPDATE SET
-                            mode = 'live',
                             live_provider = 'razorpay',
+                            razorpay_key_id = EXCLUDED.razorpay_key_id,
+                            razorpay_key_secret = EXCLUDED.razorpay_key_secret,
+                            provider_key_env = EXCLUDED.provider_key_env,
+                            provider_secret_env = EXCLUDED.provider_secret_env,
                             updated_at = NOW()
-                    ")->execute();
-                } catch (\Throwable $e) {}
-            }
+                    ")->execute([$testKey, $testSecret, $testKey, $testSecret]);
+                }
+            } catch (\Throwable $e) {}
         }
+
         jsonResponse($res);
         break;
 

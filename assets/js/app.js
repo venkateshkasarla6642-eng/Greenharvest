@@ -381,6 +381,16 @@ const App = (() => {
               <div class="pay-option-sub">Fast &amp; Verified UPI, Cards &amp; Netbanking</div>
             </div>
           </div>
+          <div class="pay-option" id="pay_razorpay" onclick="selectPay('Razorpay', this)">
+            <input type="radio" name="payMethod" value="Razorpay">
+            <div>
+              <div class="pay-option-label" style="display:flex;align-items:center;gap:6px;">
+                <span>💳</span> <strong>Razorpay</strong>
+                <span class="rzp-mode-tag" style="background:#dbeafe;color:#1e40af;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;border:1px solid #bfdbfe;">TEST MODE</span>
+              </div>
+              <div class="pay-option-sub">UPI, Credit/Debit Cards, Netbanking (Razorpay Checkout)</div>
+            </div>
+          </div>
           <div class="pay-option" id="pay_scanpay" onclick="selectPay('ScanPay', this)">
             <input type="radio" name="payMethod" value="ScanPay">
             <div><div class="pay-option-label">📷 SCAN &amp; PAY (UPI QR)</div><div class="pay-option-sub">Scan QR with GPay / PhonePe / Paytm</div></div>
@@ -498,11 +508,17 @@ const App = (() => {
       el.querySelector('input').checked = true;
       qs('#scanPaySection').style.display = (val === 'ScanPay' || val === 'GPay') ? 'block' : 'none';
       if (qs('#ghpaySection')) {
-        qs('#ghpaySection').style.display = (val === 'GreenHarvestPay') ? 'block' : 'none';
+        qs('#ghpaySection').style.display = (val === 'GreenHarvestPay' || val === 'Razorpay' || val === 'Card') ? 'block' : 'none';
       }
       const sBtn = qs('#checkoutForm button[type="submit"]');
       if (sBtn) {
-        if (val === 'GreenHarvestPay') {
+        if (val === 'Razorpay') {
+          sBtn.innerHTML = `💳 Pay ${rupee(total)} with Razorpay`;
+          sBtn.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
+        } else if (val === 'Card') {
+          sBtn.innerHTML = `💳 Pay ${rupee(total)} with Card`;
+          sBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
+        } else if (val === 'GreenHarvestPay') {
           sBtn.innerHTML = `🌿 Pay ${rupee(total)} with GreenHarvest Pay`;
           sBtn.style.background = 'linear-gradient(135deg, #10b981 0%, #059669 100%)';
         } else {
@@ -537,15 +553,15 @@ const App = (() => {
         cartClear();
         state.coupon = null;
 
-        if (method === 'GreenHarvestPay' && window.GHPay && typeof GHPay.openForOrder === 'function') {
-          GHPay.openForOrder(res.order_id, res.order_number, res.total_amount, 'GreenHarvestPay');
+        if ((method === 'GreenHarvestPay' || method === 'Razorpay' || method === 'Card') && window.GHPay && typeof GHPay.openForOrder === 'function') {
+          GHPay.openForOrder(res.order_id, res.order_number, res.total_amount, method);
         } else {
           showOrderConfirmation(res);
         }
       } else {
         toast(res.error || 'Failed to place order', 'error');
         btn.disabled = false;
-        btn.textContent = (method === 'GreenHarvestPay') ? `🌿 Pay ${rupee(total)} with GreenHarvest Pay` : `🎉 Place Order — ${rupee(total)}`;
+        btn.textContent = (method === 'Razorpay') ? `💳 Pay ${rupee(total)} with Razorpay` : ((method === 'GreenHarvestPay') ? `🌿 Pay ${rupee(total)} with GreenHarvest Pay` : `🎉 Place Order — ${rupee(total)}`);
       }
     };
   }

@@ -135,46 +135,47 @@ const PayAdmin = (function() {
     setText('statTodayPaid',    fmtCurrency(ps.today_paid || 0));
     setText('statTotalOrders',  (os.total_orders || 0) + ' total orders');
 
-    // Mode pill
-    const isLive = ps.mode === 'live';
-    const pill = document.getElementById('modePill');
-    if (pill) {
-      pill.className = 'pay-mode-pill' + (isLive ? ' live-mode' : '');
-      setText('modePillText', isLive ? '🔴 Live Mode' : '🧪 Sandbox Mode');
-    }
-
-    // Update topbar badge
-    const tbBadge = document.getElementById('topbarModeBadge');
-    if (tbBadge) {
-      tbBadge.textContent = isLive ? 'LIVE' : 'SANDBOX';
-      tbBadge.className   = 'pay-mode-badge' + (isLive ? ' live-mode' : '');
-    }
+    // Authoritative mode badge and pills update
+    updateModeBadge(
+      ps.effective_status || (ps.mode === 'live' ? (ps.live_configured ? 'LIVE PRODUCTION' : 'LIVE NOT READY') : 'SANDBOX'),
+      ps.mode || 'sandbox',
+      ps.live_provider || 'none',
+      !!ps.live_configured,
+      ps.badge_class,
+      ps.badge_text,
+      ps.pill_text,
+      ps.status_message
+    );
 
     // QR queue badge
     const qrBadge = document.getElementById('qrQueueBadge');
     if (qrBadge && ps.pending_qr_queue > 0) {
       qrBadge.textContent = ps.pending_qr_queue;
       qrBadge.style.display = '';
+    } else if (qrBadge) {
+      qrBadge.style.display = 'none';
     }
 
     // Provider status
+    const isLive = ps.mode === 'live';
+    const isConfigured = !!ps.live_configured;
     const prov = document.getElementById('providerStatus');
     if (prov) {
       prov.innerHTML = `
         <div class="pay-provider-stat">
           <div class="pay-provider-stat-label">Current Mode</div>
-          <div class="pay-provider-stat-value">${isLive ? '🔴 Live' : '🧪 Sandbox'}</div>
+          <div class="pay-provider-stat-value">${isLive ? (isConfigured ? '🔴 Live Production' : '⚠️ Live Not Ready') : '🧪 Sandbox'}</div>
         </div>
         <div class="pay-provider-stat">
           <div class="pay-provider-stat-label">Live Provider</div>
-          <div class="pay-provider-stat-value">${esc(ps.live_provider || 'None')}</div>
+          <div class="pay-provider-stat-value">${esc((ps.live_provider || 'none').toUpperCase())}</div>
         </div>
         <div class="pay-provider-stat">
           <div class="pay-provider-stat-label">Provider Config</div>
-          <div class="pay-provider-stat-value">${ps.live_configured ? '✅ Configured' : '⚠️ Not Configured'}</div>
+          <div class="pay-provider-stat-value" style="color:${isConfigured ? '#059669' : '#d97706'};font-weight:700;">${isConfigured ? '✅ Configured & Ready' : '⚠️ Configuration Required'}</div>
         </div>
         <div class="pay-provider-stat">
-          <div class="pay-provider-stat-label">Total Live Revenue</div>
+          <div class="pay-provider-stat-label">Total Verified Revenue</div>
           <div class="pay-provider-stat-value">${fmtCurrency(os.total_paid || 0)}</div>
         </div>
       `;
@@ -560,6 +561,8 @@ const PayAdmin = (function() {
 
   // ─── Settings ────────────────────────────────────────────────────────────
 
+  // ─── Settings ────────────────────────────────────────────────────────────
+
   async function loadSettings() {
     const res = await apiGet('owner_get_settings');
     if (res.error || !res.settings) {
@@ -569,62 +572,61 @@ const PayAdmin = (function() {
 
     const s = res.settings;
 
-    // Mode selection UI update
-    updateModeUI(s.mode || 'sandbox');
+    // 1. Sync hidden mode input
+    const input = document.getElementById('selectedModeInput');
+    if (input) input.value = s.mode || 'sandbox';
 
-    // Enabled methods checkboxes
+    // 2. Update all UI badges authoritatively
+    updateModeBadge(
+      s.effective_status,
+      s.mode,
+      s.live_provider,
+      s.is_ready,
+      s.badge_class,
+      s.badge_text,
+      s.pill_text,
+      s.status_message
+    );
+
+    // 3. Enabled methods checkboxes
     const methods = (s.enabled_methods || '').split(',').map(m => m.trim());
     ['qr_upi','cod','sandbox','live_upi','live_card'].forEach(m => {
       const cb = document.querySelector(`input[name="method_${m}"]`);
       if (cb) cb.checked = methods.includes(m);
     });
 
-    // Provider
+    // 4. Provider selection dropdown
     const provEl = document.getElementById('liveProvider');
     if (provEl) {
-      provEl.value = (s.live_provider && s.live_provider !== 'none') ? s.live_provider : (s.mode === 'live' ? 'razorpay' : 'none');
+      provEl.value = (s.live_provider && s.live_provider !== 'none') ? s.live_provider : 'none';
       toggleProviderFields();
     }
 
-    // Env var names
-    setVal('providerKeyEnv',    s.provider_key_env);
-    setVal('providerSecretEnv', s.provider_secret_env);
-    setVal('webhookSecretEnv',  s.webhook_secret_env);
-    setVal('settingsUpiId',     s.upi_id);
+    // 5. Populate separate provider credentials
+    setVal('razorpayKeyId',         s.razorpay_key_id);
+    setVal('razorpayKeySecret',     s.razorpay_key_secret);
+    setVal('razorpayWebhookSecret', s.razorpay_webhook_secret);
 
-    // Credentials status banner
-    const statusBanner = document.getElementById('credentialsStatusBanner');
-    if (statusBanner) {
-      if (s.has_live_keys) {
-        statusBanner.style.display = 'flex';
-        statusBanner.style.background = '#ecfdf5';
-        statusBanner.style.border = '1.5px solid #a7f3d0';
-        statusBanner.style.color = '#065f46';
-        statusBanner.style.alignItems = 'center';
-        statusBanner.style.gap = '10px';
-        statusBanner.innerHTML = `
-          <div style="font-size:24px;">✅</div>
-          <div>
-            <div style="font-weight:800;font-size:14px;">Razorpay Connected &amp; Active!</div>
-            <div style="font-size:12px;opacity:0.9;margin-top:2px;">
-              Key: <code>${s.key_id_preview || 'Configured'}</code> &bull;
-              Mode: <strong style="color:${s.is_test_key ? '#2563eb' : '#16a34a'};">${s.is_test_key ? '🧪 Test Mode (rzp_test)' : '🟢 Live Production'}</strong> &bull;
-              Ready to process customer orders.
-            </div>
-          </div>
-        `;
-      } else {
-        statusBanner.style.display = 'none';
-      }
-    }
+    setVal('cashfreeAppId',         s.cashfree_app_id);
+    setVal('cashfreeSecretKey',     s.cashfree_secret_key);
+    setVal('cashfreeWebhookSecret', s.cashfree_webhook_secret);
 
-    // Checkboxes
+    // Legacy fallbacks
+    setVal('providerKeyEnv',        s.provider_key_env);
+    setVal('providerSecretEnv',     s.provider_secret_env);
+    setVal('webhookSecretEnv',      s.webhook_secret_env);
+    setVal('settingsUpiId',         s.upi_id);
+
+    // 6. Credentials status banner
+    updateCredentialsBanner(s);
+
+    // 7. Checkboxes
     const mvEl = document.getElementById('manualVerify');
     if (mvEl) mvEl.checked = !!parseInt(s.manual_verify_enabled);
     const saEl = document.getElementById('sandboxAuto');
     if (saEl) saEl.checked = !!parseInt(s.sandbox_auto_approve);
 
-    // QR preview
+    // 8. QR preview
     if (s.qr_image_path) {
       const img = document.getElementById('qrPreviewImg');
       const placeholder = document.getElementById('qrPreviewNone');
@@ -637,7 +639,7 @@ const PayAdmin = (function() {
       if (placeholder) placeholder.style.display = 'none';
     }
 
-    // Webhook URL
+    // 9. Webhook URL
     const whu = document.getElementById('webhookUrl');
     if (whu) whu.textContent = window.location.origin + '/pay/webhook.php';
   }
@@ -647,17 +649,104 @@ const PayAdmin = (function() {
     if (el) el.value = val || '';
   }
 
-  function toggleProviderFields() {
-    const prov = document.getElementById('liveProvider')?.value;
-    const fields = document.getElementById('liveProviderFields');
-    if (fields) fields.style.display = (prov && prov !== 'none') ? 'block' : 'none';
+  function updateCredentialsBanner(s) {
+    const statusBanner = document.getElementById('credentialsStatusBanner');
+    if (!statusBanner) return;
+
+    const prov = (s.live_provider || 'none').toLowerCase();
+    const hasKeys = !!s.has_live_keys;
+
+    if (hasKeys && prov !== 'none') {
+      const isTest = prov === 'cashfree' ? s.is_cashfree_test : s.is_razorpay_test;
+      const keyPreview = prov === 'cashfree'
+        ? (s.cashfree_app_id || 'Configured')
+        : (s.razorpay_key_id ? (s.razorpay_key_id.length > 12 ? (s.razorpay_key_id.slice(0, 8) + '...' + s.razorpay_key_id.slice(-4)) : s.razorpay_key_id) : 'Configured');
+      const provLabel = prov === 'cashfree' ? 'Cashfree' : 'Razorpay';
+
+      statusBanner.style.display = 'flex';
+      statusBanner.style.background = '#ecfdf5';
+      statusBanner.style.border = '1.5px solid #a7f3d0';
+      statusBanner.style.color = '#065f46';
+      statusBanner.style.alignItems = 'center';
+      statusBanner.style.gap = '10px';
+      statusBanner.innerHTML = `
+        <div style="font-size:24px;">✅</div>
+        <div>
+          <div style="font-weight:800;font-size:14px;">${provLabel} Gateway Active &amp; Ready!</div>
+          <div style="font-size:12px;opacity:0.9;margin-top:2px;">
+            Key: <code>${esc(keyPreview)}</code> &bull;
+            Mode: <strong style="color:${isTest ? '#2563eb' : '#16a34a'};">${isTest ? '🧪 Test / Sandbox' : '🟢 Live Production'}</strong> &bull;
+            Ready to process customer orders.
+          </div>
+        </div>
+      `;
+    } else if (s.mode === 'live' && prov !== 'none') {
+      const provLabel = prov === 'cashfree' ? 'Cashfree' : 'Razorpay';
+      statusBanner.style.display = 'flex';
+      statusBanner.style.background = '#fffbeb';
+      statusBanner.style.border = '1.5px solid #fcd34d';
+      statusBanner.style.color = '#92400e';
+      statusBanner.style.alignItems = 'center';
+      statusBanner.style.gap = '10px';
+      statusBanner.innerHTML = `
+        <div style="font-size:24px;">⚠️</div>
+        <div>
+          <div style="font-weight:800;font-size:14px;">Live Mode Selected — ${provLabel} Credentials Required</div>
+          <div style="font-size:12px;opacity:0.9;margin-top:2px;">
+            Please enter your ${provLabel} API credentials below and click <strong>Test Connection</strong> to activate.
+          </div>
+        </div>
+      `;
+    } else {
+      statusBanner.style.display = 'none';
+    }
   }
 
-  function updateModeUI(mode) {
-    const isLive = (mode === 'live');
-    const input = document.getElementById('selectedModeInput');
-    if (input) input.value = isLive ? 'live' : 'sandbox';
+  function toggleProviderFields() {
+    const prov = document.getElementById('liveProvider')?.value || 'none';
+    const rzpBlock = document.getElementById('providerFieldsRazorpay');
+    const cfBlock  = document.getElementById('providerFieldsCashfree');
+    const phBlock  = document.getElementById('providerFieldsPhonepe');
 
+    if (rzpBlock) rzpBlock.style.display = (prov === 'razorpay') ? 'block' : 'none';
+    if (cfBlock)  cfBlock.style.display  = (prov === 'cashfree') ? 'block' : 'none';
+    if (phBlock)  phBlock.style.display  = (prov === 'phonepe') ? 'block' : 'none';
+
+    const warnProv = document.getElementById('warnProviderName');
+    if (warnProv) warnProv.textContent = (prov !== 'none') ? prov.toUpperCase() : 'Live Provider';
+  }
+
+  function updateModeBadge(effectiveStatus, mode, provider, isConfigured, badgeClass, badgeText, pillText, message) {
+    const isLive = (mode === 'live');
+    const effStatus = effectiveStatus || (isLive ? (isConfigured ? 'LIVE PRODUCTION' : 'LIVE NOT READY') : 'SANDBOX');
+    const isLiveReady = (isLive && isConfigured);
+    const isLiveNotReady = (isLive && !isConfigured);
+
+    // 1. Topbar badge (shared desktop & mobile header)
+    const tbBadge = document.getElementById('topbarModeBadge');
+    if (tbBadge) {
+      tbBadge.textContent = badgeText || effStatus;
+      tbBadge.className = 'pay-mode-badge ' + (badgeClass || (isLiveReady ? 'live-mode' : (isLiveNotReady ? 'warning-mode' : 'sandbox-mode')));
+      if (message) tbBadge.title = message;
+    }
+
+    // 2. Overview pill
+    const pill = document.getElementById('modePill');
+    if (pill) {
+      pill.className = 'pay-mode-pill ' + (badgeClass || (isLiveReady ? 'live-mode' : (isLiveNotReady ? 'warning-mode' : 'sandbox-mode')));
+      setText('modePillText', pillText || (isLiveReady ? '🔴 Live Production' : (isLiveNotReady ? '⚠️ Live Not Ready' : '🧪 Sandbox Mode')));
+      if (message) pill.title = message;
+    }
+
+    // 3. Settings pill
+    const setPill = document.getElementById('settingsModePill');
+    if (setPill) {
+      setPill.className = 'pay-mode-pill ' + (badgeClass || (isLiveReady ? 'live-mode' : (isLiveNotReady ? 'warning-mode' : 'sandbox-mode')));
+      setText('settingsModePillText', pillText || (isLiveReady ? '🔴 Live Production' : (isLiveNotReady ? '⚠️ Live Not Ready' : '🧪 Sandbox Mode')));
+      if (message) setPill.title = message;
+    }
+
+    // 4. Settings Mode Cards
     const cardLive = document.getElementById('cardModeLive');
     const cardSandbox = document.getElementById('cardModeSandbox');
     const indLive = document.getElementById('indicatorLive');
@@ -672,50 +761,74 @@ const PayAdmin = (function() {
       else cardSandbox.classList.remove('active');
     }
     if (indLive) {
-      indLive.style.display = isLive ? 'inline-block' : 'none';
-      indLive.style.background = '#ef4444';
-      indLive.style.color = '#fff';
+      if (isLive) {
+        indLive.style.display = 'inline-block';
+        if (isLiveReady) {
+          indLive.textContent = 'ACTIVE';
+          indLive.style.background = '#ef4444';
+          indLive.style.color = '#fff';
+        } else {
+          indLive.textContent = 'CONFIGURATION REQUIRED';
+          indLive.style.background = '#f59e0b';
+          indLive.style.color = '#fff';
+        }
+      } else {
+        indLive.style.display = 'none';
+      }
     }
     if (indSandbox) {
       indSandbox.style.display = !isLive ? 'inline-block' : 'none';
+      indSandbox.textContent = 'ACTIVE';
       indSandbox.style.background = '#10b981';
       indSandbox.style.color = '#fff';
     }
 
-    // Topbar badge
-    const tbBadge = document.getElementById('topbarModeBadge');
-    if (tbBadge) {
-      tbBadge.textContent = isLive ? 'LIVE' : 'SANDBOX';
-      tbBadge.className = 'pay-mode-badge' + (isLive ? ' live-mode' : '');
+    // 5. Warning banner on Settings page
+    const warnEl = document.getElementById('liveConfigWarning');
+    if (warnEl) {
+      warnEl.style.display = isLiveNotReady ? 'block' : 'none';
+      const warnProv = document.getElementById('warnProviderName');
+      if (warnProv) warnProv.textContent = (provider && provider !== 'none') ? provider.toUpperCase() : 'Live Provider';
     }
-    // Overview pill
-    const pill = document.getElementById('modePill');
-    if (pill) {
-      pill.className = 'pay-mode-pill' + (isLive ? ' live-mode' : '');
-      setText('modePillText', isLive ? '🔴 Live Mode' : '🧪 Sandbox Mode');
-    }
+  }
 
-    if (isLive) {
-      const provEl = document.getElementById('liveProvider');
-      if (provEl && (!provEl.value || provEl.value === 'none')) {
-        provEl.value = 'razorpay';
-      }
-      toggleProviderFields();
-      const cbLiveUpi = document.querySelector('input[name="method_live_upi"]');
-      if (cbLiveUpi) cbLiveUpi.checked = true;
-      const cbLiveCard = document.querySelector('input[name="method_live_card"]');
-      if (cbLiveCard) cbLiveCard.checked = true;
-    }
+  function updateModeUI(mode) {
+    const isLive = (mode === 'live');
+    const input = document.getElementById('selectedModeInput');
+    if (input) input.value = isLive ? 'live' : 'sandbox';
+    updateModeBadge('', isLive ? 'live' : 'sandbox', document.getElementById('liveProvider')?.value || 'none', false);
   }
 
   async function selectMode(mode) {
     const targetMode = (mode === 'live') ? 'live' : 'sandbox';
-    updateModeUI(targetMode);
+    const input = document.getElementById('selectedModeInput');
+    if (input) input.value = targetMode;
+
     toast(targetMode === 'live' ? '🔴 Switching to Live (Production) Mode...' : '🧪 Switching to Sandbox Mode...', 'info');
 
     const res = await apiPost('owner_switch_mode', { mode: targetMode });
     if (res && res.success) {
-      toast(targetMode === 'live' ? '✅ Live (Production) Mode Active & Saved!' : '✅ Sandbox Mode Active & Saved!', 'success');
+      updateModeBadge(
+        res.effective_status,
+        res.mode,
+        res.provider,
+        res.is_ready,
+        res.badge_class,
+        res.badge_text,
+        res.pill_text,
+        res.status_message
+      );
+      if (res.mode === 'live') {
+        if (res.is_ready) {
+          toast('✅ Live (Production) Mode Active & Ready!', 'success');
+        } else {
+          toast('⚠️ Live Mode Selected — Provider configuration required below!', 'info');
+        }
+      } else {
+        toast('✅ Sandbox Mode Active & Saved!', 'success');
+      }
+      await loadSettings();
+      loadDashboard();
     } else {
       toast(res?.error || 'Failed to switch mode on server.', 'error');
     }
@@ -742,27 +855,38 @@ const PayAdmin = (function() {
       if (form.querySelector(`input[name="method_${m}"]`)?.checked) methods.push(m);
     });
 
-    const modeVal = document.getElementById('selectedModeInput')?.value || form.querySelector('input[name="mode"]:checked')?.value || 'sandbox';
+    const modeVal = document.getElementById('selectedModeInput')?.value || 'sandbox';
     let provVal = document.getElementById('liveProvider')?.value || 'none';
-    if (modeVal === 'live' && provVal === 'none') {
-      provVal = 'razorpay';
-    }
+
+    const rzpKey = document.getElementById('razorpayKeyId')?.value?.trim() || '';
+    const rzpSec = document.getElementById('razorpayKeySecret')?.value?.trim() || '';
+    const rzpWh  = document.getElementById('razorpayWebhookSecret')?.value?.trim() || '';
+
+    const cfApp = document.getElementById('cashfreeAppId')?.value?.trim() || '';
+    const cfSec = document.getElementById('cashfreeSecretKey')?.value?.trim() || '';
+    const cfWh  = document.getElementById('cashfreeWebhookSecret')?.value?.trim() || '';
 
     const data = {
-      mode:                  modeVal,
-      enabled_methods:       methods.join(','),
-      live_provider:         provVal,
-      provider_key_env:      document.getElementById('providerKeyEnv')?.value || '',
-      provider_secret_env:   document.getElementById('providerSecretEnv')?.value || '',
-      webhook_secret_env:    document.getElementById('webhookSecretEnv')?.value || '',
-      upi_id:                document.getElementById('settingsUpiId')?.value || '',
-      manual_verify_enabled: document.getElementById('manualVerify')?.checked ? 1 : 0,
-      sandbox_auto_approve:  document.getElementById('sandboxAuto')?.checked ? 1 : 0
+      mode:                     modeVal,
+      enabled_methods:          methods.join(','),
+      live_provider:            provVal,
+      razorpay_key_id:          rzpKey,
+      razorpay_key_secret:      rzpSec,
+      razorpay_webhook_secret:  rzpWh,
+      cashfree_app_id:          cfApp,
+      cashfree_secret_key:      cfSec,
+      cashfree_webhook_secret:  cfWh,
+      provider_key_env:         provVal === 'cashfree' ? cfApp : rzpKey,
+      provider_secret_env:      provVal === 'cashfree' ? cfSec : rzpSec,
+      webhook_secret_env:       provVal === 'cashfree' ? cfWh : rzpWh,
+      upi_id:                   document.getElementById('settingsUpiId')?.value?.trim() || '',
+      manual_verify_enabled:    document.getElementById('manualVerify')?.checked ? 1 : 0,
+      sandbox_auto_approve:     document.getElementById('sandboxAuto')?.checked ? 1 : 0
     };
 
     const res = await apiPost('owner_update_settings', data);
     if (res.success) {
-      toast('Settings saved successfully!', 'success');
+      toast('✅ GreenHarvest Pay settings saved successfully!', 'success');
       await loadSettings();
       loadDashboard();
     } else {
@@ -770,8 +894,9 @@ const PayAdmin = (function() {
     }
   }
 
-  async function testRazorpay() {
-    const btn = document.getElementById('btnTestRazorpay');
+  async function testProvider(specificProvider) {
+    const prov = specificProvider || document.getElementById('liveProvider')?.value || 'razorpay';
+    const btn = document.getElementById(prov === 'cashfree' ? 'btnTestCashfree' : 'btnTestRazorpay');
     const resultEl = document.getElementById('testConnectionResult');
     if (!resultEl) return;
 
@@ -782,16 +907,24 @@ const PayAdmin = (function() {
     }
 
     resultEl.style.display = 'block';
-    resultEl.innerHTML = '<span style="color:#64748b;">Connecting to Razorpay API...</span>';
+    resultEl.innerHTML = `<span style="color:#64748b;">Connecting to ${prov.toUpperCase()} API...</span>`;
 
-    const keyId = document.getElementById('providerKeyEnv')?.value?.trim() || '';
-    const keySecret = document.getElementById('providerSecretEnv')?.value?.trim() || '';
+    let keyId = '';
+    let keySecret = '';
 
-    const payload = {};
+    if (prov === 'cashfree') {
+      keyId = document.getElementById('cashfreeAppId')?.value?.trim() || '';
+      keySecret = document.getElementById('cashfreeSecretKey')?.value?.trim() || '';
+    } else {
+      keyId = document.getElementById('razorpayKeyId')?.value?.trim() || document.getElementById('providerKeyEnv')?.value?.trim() || '';
+      keySecret = document.getElementById('razorpayKeySecret')?.value?.trim() || document.getElementById('providerSecretEnv')?.value?.trim() || '';
+    }
+
+    const payload = { provider: prov };
     if (keyId) payload.key_id = keyId;
     if (keySecret && !keySecret.includes('•••')) payload.key_secret = keySecret;
 
-    const res = await apiPost('owner_test_razorpay', payload);
+    const res = await apiPost('owner_test_provider', payload);
 
     if (btn) {
       btn.disabled = false;
@@ -802,52 +935,24 @@ const PayAdmin = (function() {
       resultEl.innerHTML = `
         <div style="background:#ecfdf5;border:1px solid #10b981;color:#065f46;border-radius:8px;padding:10px 12px;line-height:1.5;">
           <strong>✅ Connection Successful!</strong><br>
-          ${esc(res.message || 'Razorpay API responded successfully.')}
+          ${esc(res.message || (prov.toUpperCase() + ' API responded successfully.'))}
           ${res.key_id ? `<br><small style="color:#047857;">Active Key: <code>${esc(res.key_id)}</code></small>` : ''}
         </div>
       `;
-      // Ensure Live mode stays selected and active
-      updateModeUI('live');
-      const provEl = document.getElementById('liveProvider');
-      if (provEl) {
-        provEl.value = 'razorpay';
-        toggleProviderFields();
-      }
-      // Ensure live methods checkboxes are checked
-      const cbLiveUpi = document.querySelector('input[name="method_live_upi"]');
-      if (cbLiveUpi) cbLiveUpi.checked = true;
-      const cbLiveCard = document.querySelector('input[name="method_live_card"]');
-      if (cbLiveCard) cbLiveCard.checked = true;
-
-      // Update banner directly
-      const statusBanner = document.getElementById('credentialsStatusBanner');
-      if (statusBanner) {
-        statusBanner.style.display = 'flex';
-        statusBanner.style.background = '#ecfdf5';
-        statusBanner.style.border = '1.5px solid #a7f3d0';
-        statusBanner.style.color = '#065f46';
-        statusBanner.style.alignItems = 'center';
-        statusBanner.style.gap = '10px';
-        statusBanner.innerHTML = `
-          <div style="font-size:24px;">✅</div>
-          <div>
-            <div style="font-weight:800;font-size:14px;">Razorpay Connected &amp; Active!</div>
-            <div style="font-size:12px;opacity:0.9;margin-top:2px;">
-              Key: <code>${esc(res.key_id || keyId)}</code> &bull;
-              Mode: <strong style="color:${res.is_test ? '#2563eb' : '#16a34a'};">${res.is_test ? '🧪 Test Mode (rzp_test)' : '🟢 Live Production'}</strong> &bull;
-              Active &amp; ready to process customer orders.
-            </div>
-          </div>
-        `;
-      }
+      await loadSettings();
+      loadDashboard();
     } else {
       resultEl.innerHTML = `
         <div style="background:#fef2f2;border:1px solid #ef4444;color:#991b1b;border-radius:8px;padding:10px 12px;line-height:1.5;">
           <strong>❌ Connection Failed:</strong><br>
-          ${esc(res?.error || 'Could not authenticate with Razorpay. Please check your Key ID and Key Secret.')}
+          ${esc(res?.error || ('Could not authenticate with ' + prov.toUpperCase() + '. Please check your credentials.'))}
         </div>
       `;
     }
+  }
+
+  function testRazorpay() {
+    return testProvider('razorpay');
   }
 
   async function uploadQr() {

@@ -22,21 +22,22 @@ $rawBody = file_get_contents('php://input');
 ignore_user_abort(true);
 
 $db      = getDB();
-$live    = new LiveAdapter();
-$audit   = new AuditLogger($db);
 $service = new PaymentService($db);
+$live    = $service->getLiveAdapter();
+$audit   = new AuditLogger($db);
 
 // ─── Signature verification ───────────────────────────────────────────────────
 
-$provider  = getenv('GH_LIVE_PROVIDER') ?: 'none';
+$provider  = $live->getProviderName();
 $signature = '';
+$timestamp = $_SERVER['HTTP_X_WEBHOOK_TIMESTAMP'] ?? $_SERVER['HTTP_X_TIMESTAMP'] ?? null;
 
 switch ($provider) {
     case 'razorpay':
         $signature = $_SERVER['HTTP_X_RAZORPAY_SIGNATURE'] ?? '';
         break;
     case 'cashfree':
-        $signature = $_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? '';
+        $signature = $_SERVER['HTTP_X_WEBHOOK_SIGNATURE'] ?? $_SERVER['HTTP_X_SIGNATURE'] ?? '';
         break;
     default:
         // Sandbox webhook (only from localhost / trusted IP in dev)
@@ -82,7 +83,7 @@ if ($provider === 'none' || $provider === 'sandbox') {
         ];
     }
 } else {
-    $parseResult = $live->verifyWebhook($rawBody, $signature);
+    $parseResult = $live->verifyWebhook($rawBody, $signature, $timestamp);
 }
 
 // ─── Log the event (always, regardless of validity) ──────────────────────────

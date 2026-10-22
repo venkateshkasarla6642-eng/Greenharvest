@@ -48,8 +48,10 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
-  <?php if (!$isSandbox && !empty($settings['has_live_keys']) && ($settings['live_provider'] ?? '') === 'razorpay'): ?>
+  <?php if (!empty($settings['has_razorpay_keys']) || (!empty($settings['has_live_keys']) && ($settings['live_provider'] ?? '') === 'razorpay') || !empty($settings['live_key_id'])): ?>
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <?php elseif (!empty($settings['has_cashfree_keys']) || (!empty($settings['has_live_keys']) && ($settings['live_provider'] ?? '') === 'cashfree')): ?>
+    <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   <?php endif; ?>
   <style>
     :root {
