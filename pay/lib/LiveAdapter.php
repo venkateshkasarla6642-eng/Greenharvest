@@ -359,7 +359,7 @@ class LiveAdapter {
             $isTest = str_starts_with(strtoupper($kId), 'TEST') || str_contains(strtoupper($kId), 'TEST');
             $baseUrl = $isTest ? 'https://sandbox.cashfree.com/pg' : 'https://api.cashfree.com/pg';
 
-            // Cashfree order list check verifies App ID and Secret Key
+            // Probe Cashfree PG order endpoint to authenticate App ID & Secret Key
             $headers = [
                 'x-client-id: ' . $kId,
                 'x-client-secret: ' . $kSec,
@@ -367,8 +367,14 @@ class LiveAdapter {
                 'Accept: application/json'
             ];
 
-            $res = $this->curlGet($baseUrl . '/orders?count=1', '', '', $headers);
-            if ($res['success']) {
+            $res = $this->curlGet($baseUrl . '/orders/probe_auth_' . bin2hex(random_bytes(4)), '', '', $headers);
+            $bodyData = json_decode($res['body'] ?? '', true);
+            $httpCode = $res['http_code'] ?? 0;
+
+            // 200 OK or 404 with "order_not_found" proves credentials were authenticated by Cashfree API
+            $authSuccess = ($res['success'] || $httpCode === 404 || in_array($bodyData['code'] ?? '', ['order_not_found', 'order_not_found_error']));
+
+            if ($authSuccess && ($bodyData['code'] ?? '') !== 'request_failed' && ($bodyData['type'] ?? '') !== 'authentication_error') {
                 return [
                     'success'  => true,
                     'provider' => 'cashfree',
@@ -378,8 +384,7 @@ class LiveAdapter {
                 ];
             }
 
-            $errData = json_decode($res['body'] ?? '', true);
-            $errMsg = $errData['message'] ?? ($res['error'] ?? 'Authentication failed. Check your Cashfree App ID & Secret Key.');
+            $errMsg = $bodyData['message'] ?? ($res['error'] ?? 'Authentication failed. Check your Cashfree App ID & Secret Key.');
             return [
                 'success' => false,
                 'provider'=> 'cashfree',
