@@ -14,7 +14,7 @@ const PayAdmin = (function() {
 
   // ─── Utility ────────────────────────────────────────────────────────────
 
-  function _timeoutSignal(ms = 45000) {
+  function _timeoutSignal(ms = 60000) {
     if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
       return AbortSignal.timeout(ms);
     }
@@ -27,7 +27,7 @@ const PayAdmin = (function() {
 
   function api(params, method = 'GET') {
     const url = API + (method === 'GET' ? '?' + new URLSearchParams(params).toString() : '');
-    const opts = { credentials: 'same-origin', signal: _timeoutSignal(45000) };
+    const opts = { credentials: 'same-origin', signal: _timeoutSignal(60000) };
 
     if (method === 'POST') {
       const body = new URLSearchParams(params);
@@ -114,9 +114,15 @@ const PayAdmin = (function() {
 
   // ─── Dashboard ───────────────────────────────────────────────────────────
 
-  async function loadDashboard() {
+  async function loadDashboard(silent = false) {
     const res = await apiGet('owner_dashboard');
-    if (res.error) { toast('Failed to load dashboard: ' + res.error, 'error'); return; }
+    if (res.error) {
+      if (!silent) {
+        const isOverview = document.getElementById('sec-overview')?.classList.contains('active');
+        if (isOverview) toast('Failed to load dashboard: ' + res.error, 'error');
+      }
+      return;
+    }
 
     const ps = res.pay_stats || {};
     const os = res.order_stats || {};
@@ -828,7 +834,7 @@ const PayAdmin = (function() {
         toast('✅ Sandbox Mode Active & Saved!', 'success');
       }
       await loadSettings();
-      loadDashboard();
+      loadDashboard(true);
     } else {
       toast(res?.error || 'Failed to switch mode on server.', 'error');
     }
@@ -888,7 +894,7 @@ const PayAdmin = (function() {
     if (res.success) {
       toast('✅ GreenHarvest Pay settings saved successfully!', 'success');
       await loadSettings();
-      loadDashboard();
+      loadDashboard(true);
     } else {
       toast(res.error || 'Save failed.', 'error');
     }
@@ -940,7 +946,7 @@ const PayAdmin = (function() {
         </div>
       `;
       await loadSettings();
-      loadDashboard();
+      loadDashboard(true);
     } else {
       resultEl.innerHTML = `
         <div style="background:#fef2f2;border:1px solid #ef4444;color:#991b1b;border-radius:8px;padding:10px 12px;line-height:1.5;">
@@ -1427,9 +1433,9 @@ Thank you for shopping with GreenHarvest Fresh Vegetables!`;
   // ─── Init ────────────────────────────────────────────────────────────────
 
   function init() {
-    loadDashboard();
-    // Auto-refresh dashboard every 60 seconds
-    setInterval(loadDashboard, 60000);
+    loadDashboard(true);
+    // Auto-refresh dashboard every 60 seconds (silent background refresh)
+    setInterval(() => loadDashboard(true), 60000);
 
     // Auto-upload QR image when file is chosen
     const qrInput = document.getElementById('qrImageInput');
