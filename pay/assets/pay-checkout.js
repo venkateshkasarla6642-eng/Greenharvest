@@ -222,13 +222,19 @@ const GHPay = (function () {
 
   function mapMethod(method, isSandbox, settings) {
     const m = (method || '').toLowerCase().trim();
+    if (m === 'cashfree' || m === 'cf') {
+      return 'cashfree';
+    }
     if (m === 'razorpay' || m === 'rzp') {
       return 'razorpay';
     }
     if (m === 'card' || m === 'live_card') {
-      return 'razorpay';
+      return (settings && settings.live_provider === 'cashfree') ? 'cashfree' : 'razorpay';
     }
     if (m === 'greenharvestpay' || m === 'greenharvest' || m === 'ghpay') {
+      if (settings && (settings.live_provider === 'cashfree' || settings.has_cashfree_keys)) {
+        return 'cashfree';
+      }
       if (settings && (settings.has_razorpay_keys || settings.has_live_keys || (settings.live_key_id && settings.live_key_id.startsWith('rzp_')))) {
         return 'razorpay';
       }
@@ -376,16 +382,29 @@ const GHPay = (function () {
     const methodDefs = [];
     const isRzpReady = !!(
       settings?.has_razorpay_keys ||
-      settings?.has_live_keys ||
       (settings?.live_key_id && settings.live_key_id.startsWith('rzp_')) ||
       (settings?.live_provider === 'razorpay')
+    );
+    const isCfReady = !!(
+      settings?.has_cashfree_keys ||
+      settings?.has_live_keys ||
+      (settings?.live_provider === 'cashfree')
     );
     const isTestMode = !!(
       settings?.is_test_key ||
       (settings?.live_key_id && settings.live_key_id.startsWith('rzp_test_'))
     );
 
-    if (isRzpReady) {
+    if (isCfReady) {
+      methodDefs.push({
+        key: 'cashfree',
+        icon: '⚡',
+        label: isTestMode ? 'Cashfree (Sandbox Test Mode)' : 'Cashfree Secure Checkout',
+        sub: isTestMode ? 'UPI, Credit/Debit Cards, Netbanking (Cashfree Sandbox)' : 'Pay securely via UPI, Cards & Netbanking'
+      });
+    }
+
+    if (isRzpReady && !isCfReady) {
       methodDefs.push({
         key: 'razorpay',
         icon: '💳',
@@ -519,7 +538,7 @@ const GHPay = (function () {
         }
         break;
 
-      case 'razorpay':
+      case 'cashfree':
       case 'razorpay':
       case 'live_upi':
       case 'live_card':
@@ -536,17 +555,25 @@ const GHPay = (function () {
         );
 
         if (isProviderReady) {
-          const bannerTitle = isRzp
-            ? (isTestMode ? '🧪 Razorpay (Test Mode)' : '💳 Razorpay Standard Checkout')
-            : `⚡ Instant Gateway Ready (${provLabel})`;
-          const bannerDesc = isRzp
+          const bannerTitle = (prov === 'cashfree')
+            ? (isTestMode ? '🧪 Cashfree (Sandbox Test Mode)' : '⚡ Cashfree Secure Checkout')
+            : (isRzp
+                ? (isTestMode ? '🧪 Razorpay (Test Mode)' : '💳 Razorpay Standard Checkout')
+                : `⚡ Instant Gateway Ready (${provLabel})`);
+          const bannerDesc = (prov === 'cashfree')
             ? (isTestMode
-                ? 'Razorpay Test Mode is active. You can complete test payments using test UPI IDs, Cards, or Netbanking without real money.'
-                : 'Click below to pay securely via Razorpay standard checkout (UPI, Cards, Netbanking).')
-            : `Click below to pay securely via ${provLabel} checkout (UPI, Cards, Netbanking).`;
-          const btnText = isRzp
-            ? `💳 Pay ₹${parseFloat(amount).toFixed(2)} with Razorpay` + (isTestMode ? ' (Test Mode)' : '')
-            : `💳 Pay ₹${parseFloat(amount).toFixed(2)} Securely`;
+                ? 'Cashfree Sandbox Mode is active. Complete test payments using UPI, Cards, or Netbanking.'
+                : 'Click below to pay securely via Cashfree checkout (UPI, Cards, Netbanking).')
+            : (isRzp
+                ? (isTestMode
+                    ? 'Razorpay Test Mode is active. You can complete test payments using test UPI IDs, Cards, or Netbanking without real money.'
+                    : 'Click below to pay securely via Razorpay standard checkout (UPI, Cards, Netbanking).')
+                : `Click below to pay securely via ${provLabel} checkout (UPI, Cards, Netbanking).`);
+          const btnText = (prov === 'cashfree')
+            ? `⚡ Pay ₹${parseFloat(amount).toFixed(2)} with Cashfree`
+            : (isRzp
+                ? `💳 Pay ₹${parseFloat(amount).toFixed(2)} with Razorpay` + (isTestMode ? ' (Test Mode)' : '')
+                : `💳 Pay ₹${parseFloat(amount).toFixed(2)} Securely`);
 
           container.innerHTML = `
             <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:14px;font-size:13px;color:#166534;margin-top:10px;">

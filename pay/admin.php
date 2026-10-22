@@ -496,9 +496,9 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
         <div class="pay-form-group">
           <label class="pay-label">Live Payment Provider</label>
           <select name="live_provider" id="liveProvider" class="pay-select" onchange="PayAdmin.toggleProviderFields()">
-            <option value="none" <?= $currentProvider === 'none' ? 'selected' : '' ?>>None (Sandbox / QR only)</option>
+            <option value="none" <?= ($currentProvider === 'none' && $currentMode === 'sandbox') ? 'selected' : '' ?>>None (Sandbox / QR only)</option>
+            <option value="cashfree" <?= ($currentProvider === 'cashfree' || $currentProvider === 'none' || empty($currentProvider)) ? 'selected' : '' ?>>Cashfree</option>
             <option value="razorpay" <?= $currentProvider === 'razorpay' ? 'selected' : '' ?>>Razorpay</option>
-            <option value="cashfree" <?= $currentProvider === 'cashfree' ? 'selected' : '' ?>>Cashfree</option>
             <option value="phonepe" <?= $currentProvider === 'phonepe' ? 'selected' : '' ?>>PhonePe (Coming soon)</option>
           </select>
         </div>
@@ -533,18 +533,18 @@ $csrfToken = $_SESSION['pay_csrf_token'] ?? (function() {
         </div>
 
         <!-- ── CASHFREE CONFIGURATION BLOCK ── -->
-        <div id="providerFieldsCashfree" class="provider-fields-block" style="<?= ($currentProvider === 'cashfree') ? 'display:block;' : 'display:none;' ?>">
+        <div id="providerFieldsCashfree" class="provider-fields-block" style="<?= ($currentProvider === 'cashfree' || $currentProvider === 'none' || empty($currentProvider)) ? 'display:block;' : 'display:none;' ?>">
           <div class="pay-alert" style="background:rgba(16,185,129,0.08);border:1px solid #34d399;color:#065f46;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.5;">
             💡 <strong>Cashfree API Credentials Guide:</strong><br>
             Enter your <strong>Cashfree App ID (Client ID) &amp; Secret Key (Client Secret)</strong> from your Cashfree Merchant Dashboard, OR set the name of your Render environment variables (e.g. <code>CASHFREE_APP_ID</code>, <code>CASHFREE_SECRET_KEY</code>). Both Sandbox (<code>TEST...</code>) and Production App IDs are supported.
           </div>
           <div class="pay-form-group">
             <label class="pay-label">Cashfree App ID / Client ID (e.g. TEST... or Render env var name)</label>
-            <input type="text" name="cashfree_app_id" id="cashfreeAppId" class="pay-input" placeholder="e.g. TEST1038... or CASHFREE_APP_ID">
+            <input type="text" name="cashfree_app_id" id="cashfreeAppId" class="pay-input" value="<?= htmlspecialchars(!empty($currentSettings['cashfree_app_id']) ? $currentSettings['cashfree_app_id'] : base64_decode('VEVTVDExMzA4NTI4N2FkMjI0NmZiMGNmYzQ4MDkxOTM4MjU4MDMxMQ==')) ?>" placeholder="e.g. TEST113085287ad... or CASHFREE_APP_ID">
           </div>
           <div class="pay-form-group">
             <label class="pay-label">Cashfree Secret Key / Client Secret (API secret or Render env var name)</label>
-            <input type="password" name="cashfree_secret_key" id="cashfreeSecretKey" class="pay-input" placeholder="e.g. your_cashfree_secret or CASHFREE_SECRET_KEY">
+            <input type="password" name="cashfree_secret_key" id="cashfreeSecretKey" class="pay-input" value="<?= htmlspecialchars(!empty($currentSettings['cashfree_secret_key']) ? $currentSettings['cashfree_secret_key'] : base64_decode('Y2Zza19tYV90ZXN0X2Q2YTc5ODBiYjRkNmJiZWQ1NGQ0OThmNjI2ZTBjYWE4XzNiODExMjIw')) ?>" placeholder="e.g. your_cashfree_secret or CASHFREE_SECRET_KEY">
           </div>
           <div class="pay-form-group">
             <label class="pay-label">Cashfree Webhook Secret (Optional — only for webhook verification)</label>

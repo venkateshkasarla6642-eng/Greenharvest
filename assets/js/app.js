@@ -381,6 +381,16 @@ const App = (() => {
               <div class="pay-option-sub">Fast &amp; Verified UPI, Cards &amp; Netbanking</div>
             </div>
           </div>
+          <div class="pay-option" id="pay_cashfree" onclick="selectPay('Cashfree', this)">
+            <input type="radio" name="payMethod" value="Cashfree">
+            <div>
+              <div class="pay-option-label" style="display:flex;align-items:center;gap:6px;">
+                <span>⚡</span> <strong>Cashfree Payments</strong>
+                <span style="background:#ecfdf5;color:#059669;font-size:10px;font-weight:800;padding:2px 7px;border-radius:4px;border:1px solid #a7f3d0;">ACTIVE</span>
+              </div>
+              <div class="pay-option-sub">UPI, Credit/Debit Cards, Netbanking (Cashfree Checkout)</div>
+            </div>
+          </div>
           <div class="pay-option" id="pay_razorpay" onclick="selectPay('Razorpay', this)">
             <input type="radio" name="payMethod" value="Razorpay">
             <div>
@@ -508,11 +518,14 @@ const App = (() => {
       el.querySelector('input').checked = true;
       qs('#scanPaySection').style.display = (val === 'ScanPay' || val === 'GPay') ? 'block' : 'none';
       if (qs('#ghpaySection')) {
-        qs('#ghpaySection').style.display = (val === 'GreenHarvestPay' || val === 'Razorpay' || val === 'Card') ? 'block' : 'none';
+        qs('#ghpaySection').style.display = (val === 'GreenHarvestPay' || val === 'Cashfree' || val === 'Razorpay' || val === 'Card') ? 'block' : 'none';
       }
       const sBtn = qs('#checkoutForm button[type="submit"]');
       if (sBtn) {
-        if (val === 'Razorpay') {
+        if (val === 'Cashfree') {
+          sBtn.innerHTML = ⚡ Pay  with Cashfree;
+          sBtn.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+        } else if (val === 'Razorpay') {
           sBtn.innerHTML = `💳 Pay ${rupee(total)} with Razorpay`;
           sBtn.style.background = 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)';
         } else if (val === 'Card') {
@@ -553,7 +566,7 @@ const App = (() => {
         cartClear();
         state.coupon = null;
 
-        if ((method === 'GreenHarvestPay' || method === 'Razorpay' || method === 'Card') && window.GHPay && typeof GHPay.openForOrder === 'function') {
+        if ((method === 'GreenHarvestPay' || method === 'Cashfree' || method === 'Razorpay' || method === 'Card') && window.GHPay && typeof GHPay.openForOrder === 'function') {
           GHPay.openForOrder(res.order_id, res.order_number, res.total_amount, method);
         } else {
           showOrderConfirmation(res);
